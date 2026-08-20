@@ -172,16 +172,20 @@ video,canvas{width:100%;border-radius:12px;background:#000}
 
     <div class="card">
       <div id="checklist-lista"><p style="color:var(--muted);font-size:13px">Selecione um turno.</p></div>
+      <div id="validar-turno-area" style="margin-top:10px"></div>
     </div>
   </div>
 </div>
 
-<!-- MODAL: CONCLUIR TAREFA (selfie + geolocalização) -->
+<!-- MODAL: VALIDAR TURNO (selfie + geolocalização, depois de todas as tarefas concluídas) -->
 <div class="overlay" id="overlay-concluir">
   <div class="modal">
-    <h3 id="concluir-titulo">Concluir tarefa</h3>
-    <p id="concluir-sub">Tire uma selfie pra confirmar que a tarefa foi feita.</p>
-    <div id="geo-status" style="font-size:12.5px;color:var(--muted);margin-bottom:10px">📍 Verificando localização...</div>
+    <h3 id="concluir-titulo">Validar turno</h3>
+    <p id="concluir-sub">Todas as tarefas foram concluídas. Tire uma selfie pra confirmar.</p>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div id="geo-status" style="flex:1;font-size:12.5px;color:var(--muted)">📍 Verificando localização...</div>
+      <button type="button" class="btn btn-outline" id="btn-geo-refresh" onclick="verificarLocalizacao()" title="Atualizar localização" style="padding:8px 10px">🔄</button>
+    </div>
     <video id="cam-video" autoplay playsinline style="display:none"></video>
     <canvas id="cam-canvas" style="display:none"></canvas>
     <img id="cam-preview" class="thumb" style="display:none">
@@ -189,7 +193,7 @@ video,canvas{width:100%;border-radius:12px;background:#000}
     <div style="display:flex;gap:8px;margin-top:14px">
       <button class="btn btn-outline" style="flex:1" onclick="fecharConcluir()">Cancelar</button>
       <button class="btn btn-primary" style="flex:1" id="btn-tirar-foto" onclick="tirarFoto()">📷 Tirar foto</button>
-      <button class="btn btn-primary" style="flex:1;display:none" id="btn-confirmar-conclusao" onclick="confirmarConclusao()">✅ Confirmar</button>
+      <button class="btn btn-primary" style="flex:1;display:none" id="btn-confirmar-conclusao" onclick="confirmarValidacaoTurno()">✅ Confirmar</button>
     </div>
   </div>
 </div>
@@ -286,10 +290,11 @@ const authProvider = new firebase.auth.GoogleAuthProvider();
 
 /* ── CONSTANTES ───────────────────────────────── */
 const UNIDADES = ['CALI CRAVINGS','TEXAS COUNTRY BAR'];
-const REF_LAT = -27.1438837, REF_LNG = -48.586436;
+const REF_LAT = -27.1447222, REF_LNG = -48.5861111; // Píer Oporto, Itapema/Porto Belo (27°08'41"S 48°35'10"O)
 const RAIO_METROS = 200;
 const PTS_TAREFA = 10;
 const PTS_BONUS_PRAZO = 5;
+const PTS_BONUS_TURNO = 20; // bônus por validar o turno inteiro com foto + localização
 const LIMITE_HORA = { dia: 17, noite: 24 }; // até que hora do dia conta como "no prazo"
 
 const TAREFAS_PADRAO = {
@@ -343,10 +348,10 @@ let unidadeAtiva=null;    // unidade sendo vista agora (gestor pode trocar sem s
 let souGestor=false;
 let turnoSel=null;
 let tarefasCache={};      // {taskId:{nome,ordem,pontos}}
-let execucoesCache={};    // {taskId:{...}}
+let execucoesCache={};    // {taskId:{...}} — tarefas marcadas como feitas hoje
+let validacaoCache=null;  // {email,nome,timestamp,selfie,lat,lng} — validação do turno (só 1 por dia)
 let _fotoBase64=null;
 let _geoOk=false,_geoLat=null,_geoLng=null;
-let _tarefaAlvo=null;
 let _camStream=null;
 
 /* ── LOGIN GOOGLE ─────────────────────────────── */
@@ -462,25 +467,33 @@ async function carregarChecklist(){
   const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('checklist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
-  const [tSnap,eSnap]=await Promise.all([
+  const [tSnap,eSnap,vSnap]=await Promise.all([
     db.ref('/tarefas/'+uk+'/'+turnoSel).get(),
-    db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get()
+    db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get(),
+    db.ref('/validacoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get()
   ]);
   tarefasCache=tSnap.exists()?tSnap.val():{};
   execucoesCache=eSnap.exists()?eSnap.val():{};
+  validacaoCache=vSnap.exists()?vSnap.val():null;
   renderChecklist();
 }
 
 function renderChecklist(){
   const con=document.getElementById('checklist-lista');
   const ids=Object.keys(tarefasCache).sort((a,b)=>(tarefasCache[a].ordem||0)-(tarefasCache[b].ordem||0));
-  if(!ids.length){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa cadastrada.</p>'; return; }
+  if(!ids.length){
+    con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa cadastrada.</p>';
+    document.getElementById('validar-turno-area').innerHTML='';
+    return;
+  }
+  const travado=!!validacaoCache;
   con.innerHTML=ids.map(id=>{
     const t=tarefasCache[id];
     const feita=!!execucoesCache[id];
+    const clique=travado?'':`toggleTarefa('${id}')`;
     return `
     <div class="task-row${feita?' done':''}" id="task-${id}">
-      <div class="task-check" onclick="${feita?'':`abrirConcluir('${id}')`}">${feita?'✓':''}</div>
+      <div class="task-check" onclick="${clique}">${feita?'✓':''}</div>
       <div class="task-info">
         <div class="task-nome">${t.nome}</div>
         <div class="task-meta">${feita?('Concluída por '+(execucoesCache[id].nome||'')+' às '+new Date(execucoesCache[id].timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):'Toque pra concluir'}</div>
@@ -491,6 +504,51 @@ function renderChecklist(){
   const feitas=ids.filter(id=>execucoesCache[id]).length;
   document.getElementById('prog-fill').style.width=(ids.length?feitas/ids.length*100:0)+'%';
   document.getElementById('prog-txt').textContent=feitas+' / '+ids.length+' concluídas';
+
+  const area=document.getElementById('validar-turno-area');
+  if(validacaoCache){
+    area.innerHTML=`<div class="card" style="background:#eef7f0;border-color:#cfe9d6;margin:0">
+      <b style="color:var(--ok);font-size:13px">✅ Turno validado por ${validacaoCache.nome} às ${new Date(validacaoCache.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>
+    </div>`;
+  }else if(feitas===ids.length){
+    area.innerHTML=`<button class="btn btn-primary btn-block" onclick="abrirValidarTurno()">📸 Validar turno com foto (+${PTS_BONUS_TURNO} pts)</button>`;
+  }else{
+    area.innerHTML='';
+  }
+}
+
+/* ── TOGGLE DE TAREFA (marca/desmarca, sem foto) ── */
+async function toggleTarefa(taskId){
+  if(validacaoCache){ showToast('⚠️ Turno já validado — não dá mais pra alterar.'); return; }
+  const uk=unidadeKey(unidadeAtiva);
+  const t=tarefasCache[taskId];
+  const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
+
+  try{
+    if(execucoesCache[taskId]){
+      // Desmarcar: remove a execução e devolve os pontos
+      const pontosAntigos=execucoesCache[taskId].pontos||0;
+      await db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel+'/'+taskId).remove();
+      const pSnap=await pontRef.get();
+      const atual=pSnap.exists()?(pSnap.val().total||0):0;
+      await pontRef.set({nome:googleUser.nome,total:Math.max(0,atual-pontosAntigos)});
+      delete execucoesCache[taskId];
+    }else{
+      const hora=new Date().getHours();
+      const noPrazo = hora < LIMITE_HORA[turnoSel];
+      const pontos=(t.pontos||PTS_TAREFA)+(noPrazo?PTS_BONUS_PRAZO:0);
+      const registro={email:googleUser.email,nome:googleUser.nome,timestamp:Date.now(),pontos,noPrazo};
+      await db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel+'/'+taskId).set(registro);
+      const pSnap=await pontRef.get();
+      const atual=pSnap.exists()?(pSnap.val().total||0):0;
+      await pontRef.set({nome:googleUser.nome,total:atual+pontos});
+      execucoesCache[taskId]=registro;
+    }
+    renderChecklist();
+    carregarRanking();
+  }catch(err){
+    showToast('❌ Erro ao salvar: '+err.message);
+  }
 }
 
 /* ── RANKING ──────────────────────────────────── */
@@ -511,10 +569,14 @@ async function carregarRanking(){
   }catch(err){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Erro ao carregar ranking.</p>'; }
 }
 
-/* ── CONCLUIR TAREFA (geolocalização + selfie) ─── */
-function abrirConcluir(taskId){
-  _tarefaAlvo=taskId; _fotoBase64=null; _geoOk=false;
-  document.getElementById('concluir-titulo').textContent=tarefasCache[taskId].nome;
+/* ── VALIDAR TURNO (geolocalização + selfie, uma vez, no final) ─── */
+function abrirValidarTurno(){
+  const ids=Object.keys(tarefasCache);
+  const feitas=ids.filter(id=>execucoesCache[id]).length;
+  if(feitas<ids.length){ showToast('⚠️ Conclua todas as tarefas antes de validar o turno.'); return; }
+  if(validacaoCache){ showToast('⚠️ Turno já validado.'); return; }
+  _fotoBase64=null; _geoOk=false;
+  document.getElementById('concluir-titulo').textContent='Validar turno';
   document.getElementById('concluir-erro').style.display='none';
   document.getElementById('cam-preview').style.display='none';
   document.getElementById('cam-video').style.display='none';
@@ -545,7 +607,7 @@ async function tirarFoto(){
   const erro=document.getElementById('concluir-erro');
   erro.style.display='none';
   if(!_geoOk){
-    erro.textContent='Você precisa estar dentro do restaurante pra concluir essa tarefa.';
+    erro.textContent='Você precisa estar dentro do restaurante pra validar o turno.';
     erro.style.display='block';
     return;
   }
@@ -580,31 +642,26 @@ function fecharConcluir(){
   document.getElementById('btn-tirar-foto').onclick=tirarFoto;
   document.getElementById('btn-tirar-foto').textContent='📷 Tirar foto';
 }
-async function confirmarConclusao(){
-  if(!_geoOk || !_fotoBase64 || !_tarefaAlvo) return;
+async function confirmarValidacaoTurno(){
+  if(!_geoOk || !_fotoBase64) return;
   const uk=unidadeKey(unidadeAtiva);
-  const taskId=_tarefaAlvo;
-  const t=tarefasCache[taskId];
-  const hora=new Date().getHours();
-  const noPrazo = hora < LIMITE_HORA[turnoSel];
-  const pontos = (t.pontos||PTS_TAREFA) + (noPrazo?PTS_BONUS_PRAZO:0);
 
   const registro={
     email:googleUser.email, nome:googleUser.nome, timestamp:Date.now(),
-    selfie:_fotoBase64, lat:_geoLat, lng:_geoLng, pontos, noPrazo
+    selfie:_fotoBase64, lat:_geoLat, lng:_geoLng
   };
   try{
-    await db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel+'/'+taskId).set(registro);
+    await db.ref('/validacoes/'+uk+'/'+hojeISO()+'/'+turnoSel).set(registro);
     const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
     const pSnap=await pontRef.get();
     const atual=pSnap.exists()?(pSnap.val().total||0):0;
-    await pontRef.set({nome:googleUser.nome,total:atual+pontos});
+    await pontRef.set({nome:googleUser.nome,total:atual+PTS_BONUS_TURNO});
 
-    execucoesCache[taskId]=registro;
+    validacaoCache=registro;
     renderChecklist();
     carregarRanking();
     fecharConcluir();
-    showToast('✅ Tarefa concluída! +'+pontos+' pontos');
+    showToast('✅ Turno validado! +'+PTS_BONUS_TURNO+' pontos');
   }catch(err){
     showToast('❌ Erro ao salvar: '+err.message);
   }
@@ -746,18 +803,31 @@ async function carregarHistorico(){
   const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('hist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
-  const snap=await db.ref('/execucoes/'+uk+'/'+hojeISO()).get();
-  if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída hoje.</p>'; return; }
-  const dados=snap.val();
+  const [snap,vSnap]=await Promise.all([
+    db.ref('/execucoes/'+uk+'/'+hojeISO()).get(),
+    db.ref('/validacoes/'+uk+'/'+hojeISO()).get()
+  ]);
   let html='';
-  Object.keys(dados).forEach(turno=>{
-    Object.keys(dados[turno]).forEach(taskId=>{
-      const e=dados[turno][taskId];
+  if(snap.exists()){
+    const dados=snap.val();
+    Object.keys(dados).forEach(turno=>{
+      Object.keys(dados[turno]).forEach(taskId=>{
+        const e=dados[turno][taskId];
+        html+=`<div class="list-row">
+          <div class="info"><b>${e.nome}</b><div class="sub">${turno} · ${new Date(e.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${e.pontos}pts${e.noPrazo?'':' · atrasado'}</div></div>
+        </div>`;
+      });
+    });
+  }
+  if(vSnap.exists()){
+    const vdados=vSnap.val();
+    Object.keys(vdados).forEach(turno=>{
+      const v=vdados[turno];
       html+=`<div class="list-row">
-        <div class="info"><b>${e.nome}</b><div class="sub">${turno} · ${new Date(e.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${e.pontos}pts${e.noPrazo?'':' · atrasado'}</div></div>
+        <div class="info"><b>✅ Turno validado (${turno})</b><div class="sub">${v.nome} · ${new Date(v.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${PTS_BONUS_TURNO}pts</div></div>
       </div>`;
     });
-  });
+  }
   con.innerHTML=html || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída hoje.</p>';
 }
 
