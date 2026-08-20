@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Checklist Operacional MSH</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<style>
+:root{
+  --verde:#2C3E35;--verde-esc:#1D2A24;--areia:#F5F0E8;--branco:#fff;
+  --borda:#E4DFD3;--muted:#8A8378;--ouro:#C9A24B;--erro:#C0392B;--ok:#3C8A5B;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--areia);color:var(--verde-esc);
+  min-height:100vh;padding-bottom:24px}
+.screen{display:none}
+.screen.active{display:block}
+.hdr{background:var(--verde);color:#fff;padding:16px 18px}
+.hdr-top{display:flex;justify-content:space-between;align-items:center}
+.hdr h1{font-size:16px;font-weight:700;letter-spacing:.3px}
+.hdr .sub{font-size:12px;opacity:.85;margin-top:2px}
+.hdr-actions{display:flex;gap:8px}
+.btn{border:none;border-radius:9px;padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;transition:transform .08s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--verde);color:#fff}
+.btn-ghost{background:rgba(255,255,255,.14);color:#fff}
+.btn-outline{background:#fff;border:1.5px solid var(--borda);color:var(--verde-esc)}
+.btn-google{background:#fff;color:#3c4043;border:1px solid #dadce0;font-weight:600;font-size:14px;
+  padding:11px 20px;border-radius:8px;display:inline-flex;align-items:center;gap:10px}
+.btn-danger{background:#fdecea;color:var(--erro)}
+.btn-block{width:100%;justify-content:center;padding:13px}
+.wrap{max-width:520px;margin:0 auto;padding:16px}
+.card{background:#fff;border-radius:14px;padding:16px;border:1px solid var(--borda);margin-bottom:14px}
+.center-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:22px;padding:24px;text-align:center}
+.logo-badge{width:64px;height:64px;border-radius:16px;background:var(--verde);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800}
+.rank-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+  margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.rank-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1ede4}
+.rank-row:last-child{border-bottom:none}
+.rank-pos{width:22px;font-weight:800;font-size:13px;color:var(--muted);text-align:center}
+.rank-row.p1 .rank-pos{color:var(--ouro)}
+.rank-nome{flex:1;font-size:13.5px;font-weight:600}
+.rank-pts{font-size:13px;font-weight:800;color:var(--verde)}
+.turno-toggle{display:flex;gap:8px;margin-bottom:14px}
+.turno-btn{flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--borda);background:#fff;
+  font-weight:700;font-size:13px;cursor:pointer;color:var(--muted)}
+.turno-btn.sel{background:var(--verde);color:#fff;border-color:var(--verde)}
+.task-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f1ede4}
+.task-row:last-child{border-bottom:none}
+.task-check{width:34px;height:34px;border-radius:50%;border:2px solid var(--borda);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff}
+.task-row.done .task-check{background:var(--ok);border-color:var(--ok)}
+.task-info{flex:1}
+.task-nome{font-size:14px;font-weight:600}
+.task-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.task-row.done .task-nome{color:var(--muted);text-decoration:line-through}
+.pts-pill{font-size:11px;font-weight:800;color:var(--ouro);background:#fbf2df;border-radius:8px;padding:3px 8px}
+.progress-bar{height:7px;background:#eee5d4;border-radius:5px;overflow:hidden;margin:10px 0 4px}
+.progress-fill{height:100%;background:var(--verde);border-radius:5px;transition:width .3s}
+.overlay{position:fixed;inset:0;background:rgba(29,42,36,.55);display:none;align-items:center;
+  justify-content:center;z-index:50;padding:16px}
+.overlay.on{display:flex}
+.modal{background:#fff;border-radius:16px;padding:20px;max-width:420px;width:100%;max-height:88vh;overflow-y:auto}
+.modal h3{font-size:16px;margin-bottom:4px}
+.modal p{font-size:13px;color:var(--muted);margin-bottom:14px}
+video,canvas{width:100%;border-radius:12px;background:#000}
+.fld{margin-bottom:12px}
+.fld label{font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px}
+.fld input,.fld select{width:100%;padding:10px 12px;border:1.5px solid var(--borda);border-radius:9px;
+  font-size:14px;background:#fff}
+.msg-erro{color:var(--erro);font-size:12.5px;margin-top:8px;display:none}
+.msg-ok{color:var(--ok);font-size:12.5px;margin-top:8px;display:none}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px}
+.tab-btn{flex-shrink:0;padding:9px 14px;border-radius:9px;border:1.5px solid var(--borda);background:#fff;
+  font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer}
+.tab-btn.sel{background:var(--verde);color:#fff;border-color:var(--verde)}
+.tab-pane{display:none}
+.tab-pane.on{display:block}
+.list-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f1ede4}
+.list-row:last-child{border-bottom:none}
+.list-row .info{font-size:13px}
+.list-row .info b{font-weight:700}
+.list-row .sub{font-size:11px;color:var(--muted)}
+.btn-del{background:#fdecea;color:var(--erro);border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--verde-esc);
+  color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:80;
+  max-width:90vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.thumb{width:100%;border-radius:10px;margin-top:8px}
+.badge-off{background:#fdecea;color:var(--erro);font-size:11px;font-weight:700;padding:3px 8px;border-radius:7px}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="screen-login" class="screen active">
+  <div class="center-screen">
+    <div class="logo-badge">MSH</div>
+    <div>
+      <h1 style="font-size:20px;margin-bottom:6px">Checklist Operacional MSH</h1>
+      <p style="font-size:13px;color:var(--muted)">Cali Cravings &amp; Texas Country Bar</p>
+    </div>
+    <button class="btn-google" id="btn-google" onclick="entrarComGoogle()">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.87 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.17.28-1.7V4.97H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.03l2.99-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.97l2.99 2.33C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
+      <span id="btn-google-text">Entrar com Google</span>
+    </button>
+    <p id="login-erro" class="msg-erro" style="display:none"></p>
+  </div>
+</div>
+
+<!-- ESCOLHER UNIDADE (primeiro acesso / bootstrap) -->
+<div id="screen-unidade" class="screen">
+  <div class="center-screen">
+    <h1 style="font-size:18px">Qual unidade você acessa?</h1>
+    <p style="font-size:13px;color:var(--muted)">Primeiro acesso do sistema — você foi cadastrado como gestor.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">
+      <button class="btn btn-outline btn-block" onclick="escolherUnidadeInicial('CALI CRAVINGS')">Cali Cravings</button>
+      <button class="btn btn-outline btn-block" onclick="escolherUnidadeInicial('TEXAS COUNTRY BAR')">Texas Country Bar</button>
+    </div>
+  </div>
+</div>
+
+<!-- HOME -->
+<div id="screen-home" class="screen">
+  <div class="hdr">
+    <div class="hdr-top">
+      <div>
+        <h1 id="hdr-unidade">—</h1>
+        <div class="sub" id="hdr-nome">—</div>
+      </div>
+      <div class="hdr-actions">
+        <button class="btn btn-ghost" id="btn-gestao" onclick="abrirGestao()" style="display:none">⚙️ Gestão</button>
+        <button class="btn btn-ghost" onclick="sair()">Sair</button>
+      </div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="card" id="offline-banner" style="display:none;background:#fdecea;border-color:#f3c9c4">
+      <b style="color:var(--erro);font-size:13px">⚠️ Sem conexão com a internet</b>
+    </div>
+
+    <div class="card">
+      <div class="rank-title">🏆 Ranking — melhores pontuadores</div>
+      <div id="rank-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
+    </div>
+
+    <div class="card">
+      <div class="turno-toggle">
+        <button class="turno-btn" id="btn-turno-dia" onclick="selecionarTurno('dia')">☀️ Turno Dia</button>
+        <button class="turno-btn" id="btn-turno-noite" onclick="selecionarTurno('noite')">🌙 Turno Noite</button>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+      <div style="font-size:12px;color:var(--muted)" id="prog-txt">0 / 0 concluídas</div>
+    </div>
+
+    <div class="card">
+      <div id="checklist-lista"><p style="color:var(--muted);font-size:13px">Selecione um turno.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: CONCLUIR TAREFA (selfie + geolocalização) -->
+<div class="overlay" id="overlay-concluir">
+  <div class="modal">
+    <h3 id="concluir-titulo">Concluir tarefa</h3>
+    <p id="concluir-sub">Tire uma selfie pra confirmar que a tarefa foi feita.</p>
+    <div id="geo-status" style="font-size:12.5px;color:var(--muted);margin-bottom:10px">📍 Verificando localização...</div>
+    <video id="cam-video" autoplay playsinline style="display:none"></video>
+    <canvas id="cam-canvas" style="display:none"></canvas>
+    <img id="cam-preview" class="thumb" style="display:none">
+    <p id="concluir-erro" class="msg-erro"></p>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-outline" style="flex:1" onclick="fecharConcluir()">Cancelar</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-tirar-foto" onclick="tirarFoto()">📷 Tirar foto</button>
+      <button class="btn btn-primary" style="flex:1;display:none" id="btn-confirmar-conclusao" onclick="confirmarConclusao()">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- GESTÃO -->
+<div id="screen-gestao" class="screen">
+  <div class="hdr">
+    <div class="hdr-top">
+      <h1>⚙️ Gestão</h1>
+      <button class="btn btn-ghost" onclick="fecharGestao()">← Voltar</button>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="tabs">
+      <button class="tab-btn sel" onclick="abrirTabGestao('tarefas')" id="tabbtn-tarefas">Tarefas</button>
+      <button class="tab-btn" onclick="abrirTabGestao('responsaveis')" id="tabbtn-responsaveis">Responsáveis</button>
+      <button class="tab-btn" onclick="abrirTabGestao('colaboradores')" id="tabbtn-colaboradores">Colaboradores</button>
+      <button class="tab-btn" onclick="abrirTabGestao('historico')" id="tabbtn-historico">Histórico</button>
+    </div>
+
+    <div class="tab-pane on" id="tabpane-tarefas">
+      <div class="card">
+        <div class="turno-toggle">
+          <button class="turno-btn" id="ger-turno-dia" onclick="gerSelecionarTurno('dia')">☀️ Dia</button>
+          <button class="turno-btn" id="ger-turno-noite" onclick="gerSelecionarTurno('noite')">🌙 Noite</button>
+        </div>
+        <div id="ger-tarefas-lista"></div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <input type="text" id="ger-nova-tarefa" placeholder="Nome da nova tarefa" style="flex:1;padding:10px;border:1.5px solid var(--borda);border-radius:9px">
+          <button class="btn btn-primary" onclick="adicionarTarefaGer()">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tabpane-responsaveis">
+      <div class="card">
+        <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Defina quem é responsável por cada tarefa e por quanto tempo.</p>
+        <div id="ger-resp-lista"></div>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tabpane-colaboradores">
+      <div class="card">
+        <div id="colab-lista"></div>
+        <div class="fld" style="margin-top:10px">
+          <label>Nome</label>
+          <input type="text" id="colab-novo-nome" placeholder="Nome completo">
+        </div>
+        <div class="fld">
+          <label>E-mail (conta Google)</label>
+          <input type="email" id="colab-novo-email" placeholder="nome@gmail.com">
+        </div>
+        <div class="fld">
+          <label>Unidade</label>
+          <select id="colab-novo-unidade">
+            <option value="CALI CRAVINGS">Cali Cravings</option>
+            <option value="TEXAS COUNTRY BAR">Texas Country Bar</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px">
+          <input type="checkbox" id="colab-novo-gestor"> Também é gestor (acessa essa tela)
+        </label>
+        <button class="btn btn-primary btn-block" onclick="adicionarColaborador()">Adicionar colaborador</button>
+        <p id="colab-erro" class="msg-erro"></p>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tabpane-historico">
+      <div class="card">
+        <div class="turno-toggle">
+          <button class="turno-btn sel" onclick="carregarHistorico(this)">Hoje</button>
+        </div>
+        <div id="hist-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── FIREBASE ─────────────────────────────────── */
+firebase.initializeApp({
+  apiKey: "AIzaSyBDMz5_AS2puTwGLm8AC-SsRBNgUqdmQs0",
+  authDomain: "checklist-operacional-msh.firebaseapp.com",
+  databaseURL: "https://checklist-operacional-msh-default-rtdb.firebaseio.com",
+  projectId: "checklist-operacional-msh",
+  storageBucket: "checklist-operacional-msh.firebasestorage.app",
+  messagingSenderId: "116210002547",
+  appId: "1:116210002547:web:c25ebad9e842cb3e1e1806"
+});
+const db = firebase.database();
+const authProvider = new firebase.auth.GoogleAuthProvider();
+
+/* ── CONSTANTES ───────────────────────────────── */
+const UNIDADES = ['CALI CRAVINGS','TEXAS COUNTRY BAR'];
+const REF_LAT = -27.1438837, REF_LNG = -48.586436;
+const RAIO_METROS = 200;
+const PTS_TAREFA = 10;
+const PTS_BONUS_PRAZO = 5;
+const LIMITE_HORA = { dia: 17, noite: 24 }; // até que hora do dia conta como "no prazo"
+
+const TAREFAS_PADRAO = {
+  dia: [
+    'Polimento finalizado','Americanos e bandeja limpos','Mesas limpas e taças polidas',
+    'Galheteiros limpos','Cardápios limpos organizados','Máquinas finalizadas','Aparador limpo',
+    'Descarte organizado','Displays de mesa limpos','Televisores ligados','Som ligado na playlist',
+    'Luzes e fachada ligados','Cristaleira limpa organizada','Sofás e cadeiras limpos','Bancadas e panos limpos'
+  ],
+  noite: [
+    'Polimento finalizado','Americanos e bandeja limpos','Mesas limpas e guardadas',
+    'Galheteiros limpos','Cardápios limpos organizados','Máquinas finalizadas','Aparador limpo',
+    'Descarte organizado','Displays de mesa limpos','Televisores desligados e capa','Som desligado',
+    'Luzes e fachada desligado','Cristaleira limpa organizada','Sofás e cadeiras limpos','Bancadas e panos limpos'
+  ]
+};
+
+/* ── HELPERS ──────────────────────────────────── */
+function emailKey(email){ return (email||'').toLowerCase().replace(/\./g,','); }
+function keyParaEmail(key){ return (key||'').replace(/,/g,'.'); }
+function hojeISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function unidadeKey(u){ return (u||'').replace(/\s+/g,'_'); }
+function showToast(msg,dur=3000){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('on');
+  clearTimeout(window._tt);
+  window._tt=setTimeout(()=>el.classList.remove('on'),dur);
+}
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+id).classList.add('active');
+}
+// Distância em metros entre dois pontos (fórmula de Haversine)
+function distanciaMetros(lat1,lng1,lat2,lng2){
+  const R=6371000;
+  const toRad=x=>x*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLng=toRad(lng2-lng1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  return R*c;
+}
+function turnoAutomatico(){
+  const h=new Date().getHours();
+  return h<17 ? 'dia' : 'noite';
+}
+
+/* ── ESTADO ───────────────────────────────────── */
+let googleUser=null;      // {email,nome}
+let minhaUnidade=null;
+let souGestor=false;
+let turnoSel=null;
+let tarefasCache={};      // {taskId:{nome,ordem,pontos}}
+let execucoesCache={};    // {taskId:{...}}
+let _fotoBase64=null;
+let _geoOk=false,_geoLat=null,_geoLng=null;
+let _tarefaAlvo=null;
+let _camStream=null;
+
+/* ── LOGIN GOOGLE ─────────────────────────────── */
+async function entrarComGoogle(){
+  document.getElementById('login-erro').style.display='none';
+  try{
+    const result = await firebase.auth().signInWithPopup(authProvider);
+    await processarLoginGoogle(result.user);
+  }catch(err){
+    document.getElementById('login-erro').textContent='Erro ao entrar: '+err.message;
+    document.getElementById('login-erro').style.display='block';
+  }
+}
+async function processarLoginGoogle(user){
+  const email=user.email;
+  const key=emailKey(email);
+  const snap=await db.ref('/colaboradores_autorizados').get();
+
+  if(!snap.exists()){
+    // Bootstrap: primeiro login do sistema vira gestor automaticamente
+    await db.ref('/colaboradores_autorizados/'+key).set({
+      nome:user.displayName||email, email, unidade:null, gestor:true, ativo:true, criadoEm:Date.now()
+    });
+    googleUser={email,nome:user.displayName||email};
+    souGestor=true;
+    showScreen('unidade');
+    return;
+  }
+
+  const dados=snap.val();
+  const meu=dados[key];
+  if(!meu || meu.ativo===false){
+    document.getElementById('login-erro').textContent='Seu e-mail ainda não está autorizado. Fale com a gestão.';
+    document.getElementById('login-erro').style.display='block';
+    await firebase.auth().signOut();
+    return;
+  }
+  googleUser={email,nome:meu.nome||user.displayName||email};
+  souGestor=!!meu.gestor;
+  minhaUnidade=meu.unidade;
+  if(!minhaUnidade){ showScreen('unidade'); return; }
+  await entrarHome();
+}
+async function escolherUnidadeInicial(unidade){
+  minhaUnidade=unidade;
+  await db.ref('/colaboradores_autorizados/'+emailKey(googleUser.email)+'/unidade').set(unidade);
+  await entrarHome();
+}
+async function sair(){
+  await firebase.auth().signOut();
+  googleUser=null; minhaUnidade=null; souGestor=false;
+  showScreen('login');
+}
+firebase.auth().onAuthStateChanged(user=>{
+  if(user && !googleUser) processarLoginGoogle(user);
+});
+
+/* ── HOME ─────────────────────────────────────── */
+async function entrarHome(){
+  document.getElementById('hdr-unidade').textContent=minhaUnidade;
+  document.getElementById('hdr-nome').textContent=googleUser.nome;
+  document.getElementById('btn-gestao').style.display=souGestor?'inline-flex':'none';
+  showScreen('home');
+  await seedTarefasSeVazio(minhaUnidade);
+  carregarRanking();
+  selecionarTurno(turnoAutomatico());
+}
+
+async function seedTarefasSeVazio(unidade){
+  const uk=unidadeKey(unidade);
+  for(const turno of ['dia','noite']){
+    const ref=db.ref('/tarefas/'+uk+'/'+turno);
+    const snap=await ref.get();
+    if(!snap.exists()){
+      const obj={};
+      TAREFAS_PADRAO[turno].forEach((nome,i)=>{
+        const id='t'+(i+1);
+        obj[id]={nome,ordem:i,pontos:PTS_TAREFA};
+      });
+      await ref.set(obj);
+    }
+  }
+}
+
+async function selecionarTurno(turno){
+  turnoSel=turno;
+  document.getElementById('btn-turno-dia').classList.toggle('sel',turno==='dia');
+  document.getElementById('btn-turno-noite').classList.toggle('sel',turno==='noite');
+  await carregarChecklist();
+}
+
+async function carregarChecklist(){
+  const uk=unidadeKey(minhaUnidade);
+  const con=document.getElementById('checklist-lista');
+  con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
+  const [tSnap,eSnap]=await Promise.all([
+    db.ref('/tarefas/'+uk+'/'+turnoSel).get(),
+    db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get()
+  ]);
+  tarefasCache=tSnap.exists()?tSnap.val():{};
+  execucoesCache=eSnap.exists()?eSnap.val():{};
+  renderChecklist();
+}
+
+function renderChecklist(){
+  const con=document.getElementById('checklist-lista');
+  const ids=Object.keys(tarefasCache).sort((a,b)=>(tarefasCache[a].ordem||0)-(tarefasCache[b].ordem||0));
+  if(!ids.length){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa cadastrada.</p>'; return; }
+  con.innerHTML=ids.map(id=>{
+    const t=tarefasCache[id];
+    const feita=!!execucoesCache[id];
+    return `
+    <div class="task-row${feita?' done':''}" id="task-${id}">
+      <div class="task-check" onclick="${feita?'':`abrirConcluir('${id}')`}">${feita?'✓':''}</div>
+      <div class="task-info">
+        <div class="task-nome">${t.nome}</div>
+        <div class="task-meta">${feita?('Concluída por '+(execucoesCache[id].nome||'')+' às '+new Date(execucoesCache[id].timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):'Toque pra concluir'}</div>
+      </div>
+      <span class="pts-pill">${feita?('+'+execucoesCache[id].pontos):('+'+t.pontos)}</span>
+    </div>`;
+  }).join('');
+  const feitas=ids.filter(id=>execucoesCache[id]).length;
+  document.getElementById('prog-fill').style.width=(ids.length?feitas/ids.length*100:0)+'%';
+  document.getElementById('prog-txt').textContent=feitas+' / '+ids.length+' concluídas';
+}
+
+/* ── RANKING ──────────────────────────────────── */
+async function carregarRanking(){
+  const uk=unidadeKey(minhaUnidade);
+  const con=document.getElementById('rank-lista');
+  try{
+    const snap=await db.ref('/pontuacao/'+uk).get();
+    if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Ninguém pontuou ainda.</p>'; return; }
+    const dados=snap.val();
+    const lista=Object.keys(dados).map(k=>({nome:dados[k].nome,total:dados[k].total||0})).sort((a,b)=>b.total-a.total).slice(0,5);
+    con.innerHTML=lista.map((p,i)=>`
+      <div class="rank-row${i===0?' p1':''}">
+        <div class="rank-pos">${i+1}º</div>
+        <div class="rank-nome">${p.nome}</div>
+        <div class="rank-pts">${p.total} pts</div>
+      </div>`).join('');
+  }catch(err){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Erro ao carregar ranking.</p>'; }
+}
+
+/* ── CONCLUIR TAREFA (geolocalização + selfie) ─── */
+function abrirConcluir(taskId){
+  _tarefaAlvo=taskId; _fotoBase64=null; _geoOk=false;
+  document.getElementById('concluir-titulo').textContent=tarefasCache[taskId].nome;
+  document.getElementById('concluir-erro').style.display='none';
+  document.getElementById('cam-preview').style.display='none';
+  document.getElementById('cam-video').style.display='none';
+  document.getElementById('btn-tirar-foto').style.display='inline-flex';
+  document.getElementById('btn-confirmar-conclusao').style.display='none';
+  document.getElementById('geo-status').textContent='📍 Verificando localização...';
+  document.getElementById('overlay-concluir').classList.add('on');
+  verificarLocalizacao();
+}
+function verificarLocalizacao(){
+  if(!navigator.geolocation){
+    document.getElementById('geo-status').textContent='⚠️ Este aparelho não suporta localização.';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    _geoLat=pos.coords.latitude; _geoLng=pos.coords.longitude;
+    const dist=distanciaMetros(_geoLat,_geoLng,REF_LAT,REF_LNG);
+    _geoOk = dist<=RAIO_METROS;
+    document.getElementById('geo-status').textContent = _geoOk
+      ? '✅ Localização confirmada (dentro do restaurante).'
+      : '❌ Você está a '+Math.round(dist)+'m do restaurante — precisa estar no local pra concluir.';
+  },err=>{
+    _geoOk=false;
+    document.getElementById('geo-status').textContent='❌ Não foi possível confirmar sua localização: '+err.message;
+  },{enableHighAccuracy:true,timeout:9000});
+}
+async function tirarFoto(){
+  const erro=document.getElementById('concluir-erro');
+  erro.style.display='none';
+  if(!_geoOk){
+    erro.textContent='Você precisa estar dentro do restaurante pra concluir essa tarefa.';
+    erro.style.display='block';
+    return;
+  }
+  try{
+    _camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
+    const video=document.getElementById('cam-video');
+    video.srcObject=_camStream; video.style.display='block';
+    document.getElementById('btn-tirar-foto').textContent='📸 Capturar';
+    document.getElementById('btn-tirar-foto').onclick=capturarFrame;
+  }catch(err){
+    erro.textContent='Não foi possível acessar a câmera: '+err.message;
+    erro.style.display='block';
+  }
+}
+function capturarFrame(){
+  const video=document.getElementById('cam-video');
+  const canvas=document.getElementById('cam-canvas');
+  canvas.width=320; canvas.height=240;
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(video,0,0,320,240);
+  _fotoBase64=canvas.toDataURL('image/jpeg',0.6);
+  if(_camStream){ _camStream.getTracks().forEach(t=>t.stop()); _camStream=null; }
+  video.style.display='none';
+  const preview=document.getElementById('cam-preview');
+  preview.src=_fotoBase64; preview.style.display='block';
+  document.getElementById('btn-tirar-foto').style.display='none';
+  document.getElementById('btn-confirmar-conclusao').style.display='inline-flex';
+}
+function fecharConcluir(){
+  if(_camStream){ _camStream.getTracks().forEach(t=>t.stop()); _camStream=null; }
+  document.getElementById('overlay-concluir').classList.remove('on');
+  document.getElementById('btn-tirar-foto').onclick=tirarFoto;
+  document.getElementById('btn-tirar-foto').textContent='📷 Tirar foto';
+}
+async function confirmarConclusao(){
+  if(!_geoOk || !_fotoBase64 || !_tarefaAlvo) return;
+  const uk=unidadeKey(minhaUnidade);
+  const taskId=_tarefaAlvo;
+  const t=tarefasCache[taskId];
+  const hora=new Date().getHours();
+  const noPrazo = hora < LIMITE_HORA[turnoSel];
+  const pontos = (t.pontos||PTS_TAREFA) + (noPrazo?PTS_BONUS_PRAZO:0);
+
+  const registro={
+    email:googleUser.email, nome:googleUser.nome, timestamp:Date.now(),
+    selfie:_fotoBase64, lat:_geoLat, lng:_geoLng, pontos, noPrazo
+  };
+  try{
+    await db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel+'/'+taskId).set(registro);
+    const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
+    const pSnap=await pontRef.get();
+    const atual=pSnap.exists()?(pSnap.val().total||0):0;
+    await pontRef.set({nome:googleUser.nome,total:atual+pontos});
+
+    execucoesCache[taskId]=registro;
+    renderChecklist();
+    carregarRanking();
+    fecharConcluir();
+    showToast('✅ Tarefa concluída! +'+pontos+' pontos');
+  }catch(err){
+    showToast('❌ Erro ao salvar: '+err.message);
+  }
+}
+
+/* ── GESTÃO ───────────────────────────────────── */
+let gerTurno='dia';
+function abrirGestao(){
+  if(!souGestor){ showToast('⚠️ Só gestores acessam essa área.'); return; }
+  showScreen('gestao');
+  abrirTabGestao('tarefas');
+  gerSelecionarTurno('dia');
+  carregarColaboradoresGer();
+}
+function fecharGestao(){ showScreen('home'); }
+function abrirTabGestao(tab){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('sel'));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('on'));
+  document.getElementById('tabbtn-'+tab).classList.add('sel');
+  document.getElementById('tabpane-'+tab).classList.add('on');
+  if(tab==='responsaveis') carregarResponsaveisGer();
+  if(tab==='historico') carregarHistorico();
+}
+
+async function gerSelecionarTurno(turno){
+  gerTurno=turno;
+  document.getElementById('ger-turno-dia').classList.toggle('sel',turno==='dia');
+  document.getElementById('ger-turno-noite').classList.toggle('sel',turno==='noite');
+  await carregarTarefasGer();
+}
+async function carregarTarefasGer(){
+  const uk=unidadeKey(minhaUnidade);
+  const snap=await db.ref('/tarefas/'+uk+'/'+gerTurno).get();
+  tarefasCache=snap.exists()?snap.val():{};
+  const con=document.getElementById('ger-tarefas-lista');
+  const ids=Object.keys(tarefasCache).sort((a,b)=>(tarefasCache[a].ordem||0)-(tarefasCache[b].ordem||0));
+  con.innerHTML=ids.map(id=>`
+    <div class="list-row">
+      <div class="info"><b>${tarefasCache[id].nome}</b><div class="sub">${tarefasCache[id].pontos} pts</div></div>
+      <button class="btn-del" onclick="removerTarefaGer('${id}')">🗑️</button>
+    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa.</p>';
+}
+async function adicionarTarefaGer(){
+  const inp=document.getElementById('ger-nova-tarefa');
+  const nome=inp.value.trim();
+  if(!nome) return;
+  const uk=unidadeKey(minhaUnidade);
+  const ids=Object.keys(tarefasCache);
+  const novoId='t'+(ids.length?Math.max(...ids.map(i=>parseInt(i.replace('t',''))||0))+1:1);
+  await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+novoId).set({nome,ordem:ids.length,pontos:PTS_TAREFA});
+  inp.value='';
+  await carregarTarefasGer();
+  showToast('✅ Tarefa adicionada.');
+}
+async function removerTarefaGer(id){
+  if(!confirm('Remover essa tarefa?')) return;
+  const uk=unidadeKey(minhaUnidade);
+  await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+id).remove();
+  await carregarTarefasGer();
+}
+
+async function carregarResponsaveisGer(){
+  const uk=unidadeKey(minhaUnidade);
+  const con=document.getElementById('ger-resp-lista');
+  const [tSnapDia,tSnapNoite,rSnap,cSnap]=await Promise.all([
+    db.ref('/tarefas/'+uk+'/dia').get(), db.ref('/tarefas/'+uk+'/noite').get(),
+    db.ref('/responsaveis/'+uk).get(), db.ref('/colaboradores_autorizados').get()
+  ]);
+  const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===minhaUnidade):[];
+  const resp=rSnap.exists()?rSnap.val():{};
+  let html='';
+  ['dia','noite'].forEach(turno=>{
+    const tarefas=(turno==='dia'?tSnapDia:tSnapNoite).val()||{};
+    const ids=Object.keys(tarefas).sort((a,b)=>(tarefas[a].ordem||0)-(tarefas[b].ordem||0));
+    html+=`<div style="font-weight:700;font-size:12.5px;margin:10px 0 4px;color:var(--muted);text-transform:uppercase">${turno==='dia'?'☀️ Dia':'🌙 Noite'}</div>`;
+    ids.forEach(id=>{
+      const atual=(resp[turno]||{})[id];
+      html+=`<div class="list-row">
+        <div class="info" style="flex:1"><b>${tarefas[id].nome}</b></div>
+        <select style="padding:6px;border-radius:7px;border:1px solid var(--borda)" onchange="definirResponsavel('${turno}','${id}',this.value)">
+          <option value="">Ninguém fixo</option>
+          ${colabs.map(c=>`<option value="${c.email}" ${atual&&atual.email===c.email?'selected':''}>${c.nome}</option>`).join('')}
+        </select>
+      </div>`;
+    });
+  });
+  con.innerHTML=html;
+}
+async function definirResponsavel(turno,taskId,email){
+  const uk=unidadeKey(minhaUnidade);
+  if(!email){ await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).remove(); return; }
+  const nome=(await db.ref('/colaboradores_autorizados/'+emailKey(email)).get()).val()?.nome||email;
+  await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).set({email,nome,inicio:hojeISO()});
+  showToast('✅ Responsável definido.');
+}
+
+async function carregarColaboradoresGer(){
+  const con=document.getElementById('colab-lista');
+  con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
+  const snap=await db.ref('/colaboradores_autorizados').get();
+  if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhum colaborador cadastrado.</p>'; return; }
+  const dados=snap.val();
+  const keys=Object.keys(dados);
+  con.innerHTML=keys.map(k=>{
+    const c=dados[k];
+    return `<div class="list-row">
+      <div class="info"><b>${c.nome||keyParaEmail(k)}</b><div class="sub">${c.unidade||'sem unidade'}${c.gestor?' · gestor':''}</div></div>
+      <button class="btn-del" onclick="removerColaborador('${k}')">🗑️</button>
+    </div>`;
+  }).join('');
+}
+async function adicionarColaborador(){
+  const nome=document.getElementById('colab-novo-nome').value.trim();
+  const email=document.getElementById('colab-novo-email').value.trim().toLowerCase();
+  const unidade=document.getElementById('colab-novo-unidade').value;
+  const gestor=document.getElementById('colab-novo-gestor').checked;
+  const erro=document.getElementById('colab-erro');
+  erro.style.display='none';
+  if(!nome || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    erro.textContent='Preencha nome e um e-mail válido.';
+    erro.style.display='block';
+    return;
+  }
+  await db.ref('/colaboradores_autorizados/'+emailKey(email)).set({nome,email,unidade,gestor,ativo:true,criadoEm:Date.now()});
+  document.getElementById('colab-novo-nome').value='';
+  document.getElementById('colab-novo-email').value='';
+  document.getElementById('colab-novo-gestor').checked=false;
+  showToast('✅ '+nome+' cadastrado(a)!');
+  await carregarColaboradoresGer();
+}
+async function removerColaborador(key){
+  if(!confirm('Remover o acesso de '+keyParaEmail(key)+'?')) return;
+  await db.ref('/colaboradores_autorizados/'+key).remove();
+  await carregarColaboradoresGer();
+  showToast('✅ Acesso removido.');
+}
+
+async function carregarHistorico(){
+  const uk=unidadeKey(minhaUnidade);
+  const con=document.getElementById('hist-lista');
+  con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
+  const snap=await db.ref('/execucoes/'+uk+'/'+hojeISO()).get();
+  if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída hoje.</p>'; return; }
+  const dados=snap.val();
+  let html='';
+  Object.keys(dados).forEach(turno=>{
+    Object.keys(dados[turno]).forEach(taskId=>{
+      const e=dados[turno][taskId];
+      html+=`<div class="list-row">
+        <div class="info"><b>${e.nome}</b><div class="sub">${turno} · ${new Date(e.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${e.pontos}pts${e.noPrazo?'':' · atrasado'}</div></div>
+      </div>`;
+    });
+  });
+  con.innerHTML=html || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída hoje.</p>';
+}
+
+/* ── CONEXÃO ──────────────────────────────────── */
+function atualizarBannerConexao(){
+  document.getElementById('offline-banner').style.display = navigator.onLine ? 'none' : 'block';
+}
+window.addEventListener('online',atualizarBannerConexao);
+window.addEventListener('offline',atualizarBannerConexao);
+document.addEventListener('DOMContentLoaded',atualizarBannerConexao);
+</script>
+</body>
+</html>
