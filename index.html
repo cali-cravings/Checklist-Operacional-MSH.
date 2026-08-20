@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Checklist Operacional MSH</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#2C3E35">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Checklist MSH">
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
@@ -27,6 +34,7 @@ body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--are
 .btn:active{transform:scale(.97)}
 .btn-primary{background:var(--verde);color:#fff}
 .btn-ghost{background:rgba(255,255,255,.14);color:#fff}
+.btn-ghost.sel{background:var(--ouro);color:var(--verde-esc);font-weight:800}
 .btn-outline{background:#fff;border:1.5px solid var(--borda);color:var(--verde-esc)}
 .btn-google{background:#fff;color:#3c4043;border:1px solid #dadce0;font-weight:600;font-size:14px;
   padding:11px 20px;border-radius:8px;display:inline-flex;align-items:center;gap:10px}
@@ -137,6 +145,10 @@ video,canvas{width:100%;border-radius:12px;background:#000}
         <button class="btn btn-ghost" id="btn-gestao" onclick="abrirGestao()" style="display:none">⚙️ Gestão</button>
         <button class="btn btn-ghost" onclick="sair()">Sair</button>
       </div>
+    </div>
+    <div id="unidade-switch" style="display:none;margin-top:10px;gap:8px">
+      <button class="btn btn-ghost" id="sw-cali" onclick="trocarUnidadeAtiva('CALI CRAVINGS')" style="flex:1;justify-content:center">Cali Cravings</button>
+      <button class="btn btn-ghost" id="sw-texas" onclick="trocarUnidadeAtiva('TEXAS COUNTRY BAR')" style="flex:1;justify-content:center">Texas Country Bar</button>
     </div>
   </div>
   <div class="wrap">
@@ -326,7 +338,8 @@ function turnoAutomatico(){
 
 /* ── ESTADO ───────────────────────────────────── */
 let googleUser=null;      // {email,nome}
-let minhaUnidade=null;
+let minhaUnidade=null;    // unidade fixa cadastrada do colaborador
+let unidadeAtiva=null;    // unidade sendo vista agora (gestor pode trocar sem sair)
 let souGestor=false;
 let turnoSel=null;
 let tarefasCache={};      // {taskId:{nome,ordem,pontos}}
@@ -384,7 +397,7 @@ async function escolherUnidadeInicial(unidade){
 }
 async function sair(){
   await firebase.auth().signOut();
-  googleUser=null; minhaUnidade=null; souGestor=false;
+  googleUser=null; minhaUnidade=null; unidadeAtiva=null; souGestor=false;
   showScreen('login');
 }
 firebase.auth().onAuthStateChanged(user=>{
@@ -393,13 +406,33 @@ firebase.auth().onAuthStateChanged(user=>{
 
 /* ── HOME ─────────────────────────────────────── */
 async function entrarHome(){
-  document.getElementById('hdr-unidade').textContent=minhaUnidade;
+  unidadeAtiva=minhaUnidade;
   document.getElementById('hdr-nome').textContent=googleUser.nome;
   document.getElementById('btn-gestao').style.display=souGestor?'inline-flex':'none';
+  // Gestor consegue alternar entre as duas unidades sem precisar de um
+  // cadastro separado — o cadastro fixo dele continua sendo só a "casa"
+  // dele, isso aqui é só pra visualizar/gerenciar a outra temporariamente.
+  document.getElementById('unidade-switch').style.display=souGestor?'flex':'none';
+  atualizarHdrUnidade();
   showScreen('home');
-  await seedTarefasSeVazio(minhaUnidade);
+  await carregarUnidadeAtiva();
+}
+function atualizarHdrUnidade(){
+  document.getElementById('hdr-unidade').textContent=unidadeAtiva;
+  document.getElementById('sw-cali').classList.toggle('sel',unidadeAtiva==='CALI CRAVINGS');
+  document.getElementById('sw-texas').classList.toggle('sel',unidadeAtiva==='TEXAS COUNTRY BAR');
+}
+async function carregarUnidadeAtiva(){
+  await seedTarefasSeVazio(unidadeAtiva);
   carregarRanking();
   selecionarTurno(turnoAutomatico());
+}
+async function trocarUnidadeAtiva(unidade){
+  if(unidade===unidadeAtiva) return;
+  unidadeAtiva=unidade;
+  atualizarHdrUnidade();
+  await carregarUnidadeAtiva();
+  showToast('👁️ Vendo agora: '+unidade);
 }
 
 async function seedTarefasSeVazio(unidade){
@@ -426,7 +459,7 @@ async function selecionarTurno(turno){
 }
 
 async function carregarChecklist(){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('checklist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
   const [tSnap,eSnap]=await Promise.all([
@@ -462,7 +495,7 @@ function renderChecklist(){
 
 /* ── RANKING ──────────────────────────────────── */
 async function carregarRanking(){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('rank-lista');
   try{
     const snap=await db.ref('/pontuacao/'+uk).get();
@@ -549,7 +582,7 @@ function fecharConcluir(){
 }
 async function confirmarConclusao(){
   if(!_geoOk || !_fotoBase64 || !_tarefaAlvo) return;
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const taskId=_tarefaAlvo;
   const t=tarefasCache[taskId];
   const hora=new Date().getHours();
@@ -603,7 +636,7 @@ async function gerSelecionarTurno(turno){
   await carregarTarefasGer();
 }
 async function carregarTarefasGer(){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const snap=await db.ref('/tarefas/'+uk+'/'+gerTurno).get();
   tarefasCache=snap.exists()?snap.val():{};
   const con=document.getElementById('ger-tarefas-lista');
@@ -618,7 +651,7 @@ async function adicionarTarefaGer(){
   const inp=document.getElementById('ger-nova-tarefa');
   const nome=inp.value.trim();
   if(!nome) return;
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const ids=Object.keys(tarefasCache);
   const novoId='t'+(ids.length?Math.max(...ids.map(i=>parseInt(i.replace('t',''))||0))+1:1);
   await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+novoId).set({nome,ordem:ids.length,pontos:PTS_TAREFA});
@@ -628,19 +661,19 @@ async function adicionarTarefaGer(){
 }
 async function removerTarefaGer(id){
   if(!confirm('Remover essa tarefa?')) return;
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+id).remove();
   await carregarTarefasGer();
 }
 
 async function carregarResponsaveisGer(){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('ger-resp-lista');
   const [tSnapDia,tSnapNoite,rSnap,cSnap]=await Promise.all([
     db.ref('/tarefas/'+uk+'/dia').get(), db.ref('/tarefas/'+uk+'/noite').get(),
     db.ref('/responsaveis/'+uk).get(), db.ref('/colaboradores_autorizados').get()
   ]);
-  const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===minhaUnidade):[];
+  const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva):[];
   const resp=rSnap.exists()?rSnap.val():{};
   let html='';
   ['dia','noite'].forEach(turno=>{
@@ -661,7 +694,7 @@ async function carregarResponsaveisGer(){
   con.innerHTML=html;
 }
 async function definirResponsavel(turno,taskId,email){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   if(!email){ await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).remove(); return; }
   const nome=(await db.ref('/colaboradores_autorizados/'+emailKey(email)).get()).val()?.nome||email;
   await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).set({email,nome,inicio:hojeISO()});
@@ -710,7 +743,7 @@ async function removerColaborador(key){
 }
 
 async function carregarHistorico(){
-  const uk=unidadeKey(minhaUnidade);
+  const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('hist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
   const snap=await db.ref('/execucoes/'+uk+'/'+hojeISO()).get();
