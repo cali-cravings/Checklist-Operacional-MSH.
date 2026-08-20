@@ -373,6 +373,7 @@ let responsaveisCache={}; // {taskId:{email,nome,...}} — fixos definidos manua
 let colabsAtivosCache=[]; // colaboradores ativos da unidade ativa, p/ calcular o rodízio automático
 let _fotoBase64=null;
 let _geoOk=false,_geoLat=null,_geoLng=null;
+let _geoWatchdog=null; // timeout manual — cobre navegadores que travam sem nunca chamar o callback nativo
 let _camStream=null;
 
 /* ── LOGIN GOOGLE ─────────────────────────────── */
@@ -619,7 +620,21 @@ function verificarLocalizacao(){
     document.getElementById('geo-status').textContent='⚠️ Este aparelho não suporta localização.';
     return;
   }
+  _geoOk=false;
+  document.getElementById('geo-status').textContent='📍 Verificando localização...';
+  if(_geoWatchdog) clearTimeout(_geoWatchdog);
+  // Watchdog manual: alguns navegadores (principalmente dentro de apps como
+  // WhatsApp/Instagram/Facebook) travam pedindo localização sem nunca chamar
+  // o callback nativo de sucesso OU de erro. Sem isso, a tela fica presa em
+  // "Verificando localização..." pra sempre. Com isso, depois de 10s o usuário
+  // sempre vê uma mensagem de erro com o que fazer.
+  _geoWatchdog=setTimeout(()=>{
+    _geoOk=false;
+    document.getElementById('geo-status').innerHTML='❌ Não conseguimos obter sua localização a tempo.<br>Verifique se o GPS/Localização está ligado no celular e se o navegador tem permissão pra esse site. Se você abriu esse link pelo WhatsApp, Instagram ou Facebook, toque nos "⋮" (três pontinhos) e escolha "Abrir no Chrome" ou "Abrir no navegador".';
+  },10000);
+
   navigator.geolocation.getCurrentPosition(pos=>{
+    clearTimeout(_geoWatchdog);
     _geoLat=pos.coords.latitude; _geoLng=pos.coords.longitude;
     const dist=distanciaMetros(_geoLat,_geoLng,REF_LAT,REF_LNG);
     _geoOk = dist<=RAIO_METROS;
@@ -627,9 +642,12 @@ function verificarLocalizacao(){
       ? '✅ Localização confirmada (dentro do restaurante).'
       : '❌ Você está a '+Math.round(dist)+'m do restaurante — precisa estar no local pra concluir.';
   },err=>{
+    clearTimeout(_geoWatchdog);
     _geoOk=false;
-    document.getElementById('geo-status').textContent='❌ Não foi possível confirmar sua localização: '+err.message;
-  },{enableHighAccuracy:true,timeout:9000});
+    let msg=err.message;
+    if(err.code===1) msg='Permissão de localização negada. Vá nas configurações do navegador ou do celular e permita localização pra esse site.';
+    document.getElementById('geo-status').textContent='❌ Não foi possível confirmar sua localização: '+msg;
+  },{enableHighAccuracy:true,timeout:9000,maximumAge:0});
 }
 async function tirarFoto(){
   const erro=document.getElementById('concluir-erro');
