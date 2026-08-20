@@ -263,8 +263,9 @@ video,canvas{width:100%;border-radius:12px;background:#000}
 
     <div class="tab-pane" id="tabpane-historico">
       <div class="card">
-        <div class="turno-toggle">
-          <button class="turno-btn sel" onclick="carregarHistorico(this)">Hoje</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <input type="date" id="hist-data" style="flex:1;padding:9px;border:1.5px solid var(--borda);border-radius:9px" onchange="carregarHistorico()">
+          <button class="btn btn-outline" onclick="carregarHistorico()" title="Atualizar" style="padding:9px 10px">🔄</button>
         </div>
         <div id="hist-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
       </div>
@@ -296,6 +297,24 @@ const PTS_TAREFA = 10;
 const PTS_BONUS_PRAZO = 5;
 const PTS_BONUS_TURNO = 20; // bônus por validar o turno inteiro com foto + localização
 const LIMITE_HORA = { dia: 17, noite: 24 }; // até que hora do dia conta como "no prazo"
+const RODIZIO_EPOCH = new Date('2026-01-05T00:00:00'); // segunda-feira de referência p/ contar semanas
+
+/* Índice de semana que muda automaticamente a cada 7 dias, sem precisar de nenhum
+   gatilho manual — só depende da data de hoje. É a base do rodízio automático. */
+function indiceRodizio(){
+  const dias = Math.floor((Date.now()-RODIZIO_EPOCH.getTime())/86400000);
+  return Math.floor(dias/7);
+}
+/* Escolhe automaticamente o responsável por uma tarefa nesta semana, revezando
+   entre os colaboradores ativos da unidade. Cada tarefa (por ordem) começa
+   "deslocada" das outras, e o turno da noite tem um deslocamento extra — assim
+   tarefas diferentes tendem a cair com pessoas diferentes na mesma semana. */
+function responsavelAutomatico(colabsAtivos,turno,ordemTarefa){
+  if(!colabsAtivos.length) return null;
+  const deslocNoite = turno==='noite' ? Math.ceil(colabsAtivos.length/2) : 0;
+  const i = (ordemTarefa + indiceRodizio() + deslocNoite) % colabsAtivos.length;
+  return colabsAtivos[i];
+}
 
 const TAREFAS_PADRAO = {
   dia: [
@@ -350,6 +369,8 @@ let turnoSel=null;
 let tarefasCache={};      // {taskId:{nome,ordem,pontos}}
 let execucoesCache={};    // {taskId:{...}} — tarefas marcadas como feitas hoje
 let validacaoCache=null;  // {email,nome,timestamp,selfie,lat,lng} — validação do turno (só 1 por dia)
+let responsaveisCache={}; // {taskId:{email,nome,...}} — fixos definidos manualmente pelo gestor
+let colabsAtivosCache=[]; // colaboradores ativos da unidade ativa, p/ calcular o rodízio automático
 let _fotoBase64=null;
 let _geoOk=false,_geoLat=null,_geoLng=null;
 let _camStream=null;
@@ -467,14 +488,18 @@ async function carregarChecklist(){
   const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('checklist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
-  const [tSnap,eSnap,vSnap]=await Promise.all([
+  const [tSnap,eSnap,vSnap,rSnap,cSnap]=await Promise.all([
     db.ref('/tarefas/'+uk+'/'+turnoSel).get(),
     db.ref('/execucoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get(),
-    db.ref('/validacoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get()
+    db.ref('/validacoes/'+uk+'/'+hojeISO()+'/'+turnoSel).get(),
+    db.ref('/responsaveis/'+uk+'/'+turnoSel).get(),
+    db.ref('/colaboradores_autorizados').get()
   ]);
   tarefasCache=tSnap.exists()?tSnap.val():{};
   execucoesCache=eSnap.exists()?eSnap.val():{};
   validacaoCache=vSnap.exists()?vSnap.val():null;
+  responsaveisCache=rSnap.exists()?rSnap.val():{};
+  colabsAtivosCache=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva && c.ativo!==false):[];
   renderChecklist();
 }
 
@@ -491,12 +516,15 @@ function renderChecklist(){
     const t=tarefasCache[id];
     const feita=!!execucoesCache[id];
     const clique=travado?'':`toggleTarefa('${id}')`;
+    const respFixo=responsaveisCache[id];
+    const respAuto=!respFixo?responsavelAutomatico(colabsAtivosCache,turnoSel,t.ordem||0):null;
+    const respLinha = respFixo ? `👤 ${respFixo.nome}` : (respAuto ? `🔁 ${respAuto.nome} (semana)` : '');
     return `
     <div class="task-row${feita?' done':''}" id="task-${id}">
       <div class="task-check" onclick="${clique}">${feita?'✓':''}</div>
       <div class="task-info">
         <div class="task-nome">${t.nome}</div>
-        <div class="task-meta">${feita?('Concluída por '+(execucoesCache[id].nome||'')+' às '+new Date(execucoesCache[id].timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):'Toque pra concluir'}</div>
+        <div class="task-meta">${feita?('Concluída por '+(execucoesCache[id].nome||'')+' às '+new Date(execucoesCache[id].timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):('Toque pra concluir'+(respLinha?' · '+respLinha:''))}</div>
       </div>
       <span class="pts-pill">${feita?('+'+execucoesCache[id].pontos):('+'+t.pontos)}</span>
     </div>`;
@@ -683,7 +711,11 @@ function abrirTabGestao(tab){
   document.getElementById('tabbtn-'+tab).classList.add('sel');
   document.getElementById('tabpane-'+tab).classList.add('on');
   if(tab==='responsaveis') carregarResponsaveisGer();
-  if(tab==='historico') carregarHistorico();
+  if(tab==='historico'){
+    const inp=document.getElementById('hist-data');
+    if(!inp.value) inp.value=hojeISO();
+    carregarHistorico();
+  }
 }
 
 async function gerSelecionarTurno(turno){
@@ -700,9 +732,20 @@ async function carregarTarefasGer(){
   const ids=Object.keys(tarefasCache).sort((a,b)=>(tarefasCache[a].ordem||0)-(tarefasCache[b].ordem||0));
   con.innerHTML=ids.map(id=>`
     <div class="list-row">
-      <div class="info"><b>${tarefasCache[id].nome}</b><div class="sub">${tarefasCache[id].pontos} pts</div></div>
+      <div class="info"><b>${tarefasCache[id].nome}</b>
+        <div class="sub" style="display:flex;align-items:center;gap:5px">
+          <input type="number" min="0" value="${tarefasCache[id].pontos}" style="width:56px;padding:4px 6px;border:1.5px solid var(--borda);border-radius:6px" onchange="atualizarPontosTarefaGer('${id}',this.value)"> pts
+        </div>
+      </div>
       <button class="btn-del" onclick="removerTarefaGer('${id}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa.</p>';
+}
+async function atualizarPontosTarefaGer(id,valor){
+  const pontos=Math.max(0,parseInt(valor,10)||0);
+  const uk=unidadeKey(unidadeAtiva);
+  await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+id+'/pontos').set(pontos);
+  if(tarefasCache[id]) tarefasCache[id].pontos=pontos;
+  showToast('✅ Pontuação da tarefa atualizada.');
 }
 async function adicionarTarefaGer(){
   const inp=document.getElementById('ger-nova-tarefa');
@@ -730,20 +773,25 @@ async function carregarResponsaveisGer(){
     db.ref('/tarefas/'+uk+'/dia').get(), db.ref('/tarefas/'+uk+'/noite').get(),
     db.ref('/responsaveis/'+uk).get(), db.ref('/colaboradores_autorizados').get()
   ]);
-  const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva):[];
+  const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva && c.ativo!==false):[];
   const resp=rSnap.exists()?rSnap.val():{};
-  let html='';
+  let html=`<div style="background:#eef7f0;border:1px solid #cfe9d6;border-radius:9px;padding:9px 11px;font-size:12px;color:var(--verde-esc);margin-bottom:10px">
+    🔁 <b>Rodízio automático ativo</b> — quando ninguém fica fixo numa tarefa, o sistema troca sozinho o responsável a cada 7 dias entre os colaboradores ativos da unidade. Selecionar um nome trava a tarefa pra essa pessoa até você tirar.
+  </div>`;
   ['dia','noite'].forEach(turno=>{
     const tarefas=(turno==='dia'?tSnapDia:tSnapNoite).val()||{};
     const ids=Object.keys(tarefas).sort((a,b)=>(tarefas[a].ordem||0)-(tarefas[b].ordem||0));
     html+=`<div style="font-weight:700;font-size:12.5px;margin:10px 0 4px;color:var(--muted);text-transform:uppercase">${turno==='dia'?'☀️ Dia':'🌙 Noite'}</div>`;
     ids.forEach(id=>{
       const atual=(resp[turno]||{})[id];
+      const auto=responsavelAutomatico(colabs,turno,tarefas[id].ordem||0);
       html+=`<div class="list-row">
-        <div class="info" style="flex:1"><b>${tarefas[id].nome}</b></div>
+        <div class="info" style="flex:1"><b>${tarefas[id].nome}</b>
+          ${!atual && auto?`<div class="sub">🔁 essa semana: ${auto.nome}</div>`:''}
+        </div>
         <select style="padding:6px;border-radius:7px;border:1px solid var(--borda)" onchange="definirResponsavel('${turno}','${id}',this.value)">
-          <option value="">Ninguém fixo</option>
-          ${colabs.map(c=>`<option value="${c.email}" ${atual&&atual.email===c.email?'selected':''}>${c.nome}</option>`).join('')}
+          <option value="">🔁 Rodízio automático</option>
+          ${colabs.map(c=>`<option value="${c.email}" ${atual&&atual.email===c.email?'selected':''}>${c.nome} (fixo)</option>`).join('')}
         </select>
       </div>`;
     });
@@ -801,11 +849,12 @@ async function removerColaborador(key){
 
 async function carregarHistorico(){
   const uk=unidadeKey(unidadeAtiva);
+  const data=document.getElementById('hist-data').value||hojeISO();
   const con=document.getElementById('hist-lista');
   con.innerHTML='<p style="color:var(--muted);font-size:13px">Carregando...</p>';
   const [snap,vSnap]=await Promise.all([
-    db.ref('/execucoes/'+uk+'/'+hojeISO()).get(),
-    db.ref('/validacoes/'+uk+'/'+hojeISO()).get()
+    db.ref('/execucoes/'+uk+'/'+data).get(),
+    db.ref('/validacoes/'+uk+'/'+data).get()
   ]);
   let html='';
   if(snap.exists()){
@@ -814,7 +863,14 @@ async function carregarHistorico(){
       Object.keys(dados[turno]).forEach(taskId=>{
         const e=dados[turno][taskId];
         html+=`<div class="list-row">
-          <div class="info"><b>${e.nome}</b><div class="sub">${turno} · ${new Date(e.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${e.pontos}pts${e.noPrazo?'':' · atrasado'}</div></div>
+          <div class="info"><b>${e.nome}</b>
+            <div class="sub" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+              ${turno} · ${new Date(e.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} ·
+              <input type="number" min="0" value="${e.pontos}" style="width:52px;padding:3px 5px;border:1.5px solid var(--borda);border-radius:6px" onchange="editarPontosHist('${turno}','${taskId}',this.value)"> pts
+              ${e.noPrazo?'':' · atrasado'}
+            </div>
+          </div>
+          <button class="btn-del" onclick="apagarExecucaoHist('${turno}','${taskId}')">🗑️</button>
         </div>`;
       });
     });
@@ -825,10 +881,64 @@ async function carregarHistorico(){
       const v=vdados[turno];
       html+=`<div class="list-row">
         <div class="info"><b>✅ Turno validado (${turno})</b><div class="sub">${v.nome} · ${new Date(v.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${PTS_BONUS_TURNO}pts</div></div>
+        <button class="btn-del" onclick="apagarValidacaoHist('${turno}')">🗑️</button>
       </div>`;
     });
   }
-  con.innerHTML=html || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída hoje.</p>';
+  con.innerHTML=html || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída nesse dia.</p>';
+}
+
+async function ajustarPontuacao(email,nome,delta){
+  const uk=unidadeKey(unidadeAtiva);
+  const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(email));
+  const pSnap=await pontRef.get();
+  const atual=pSnap.exists()?(pSnap.val().total||0):0;
+  await pontRef.set({nome,total:Math.max(0,atual+delta)});
+}
+
+async function editarPontosHist(turno,taskId,valor){
+  const uk=unidadeKey(unidadeAtiva);
+  const data=document.getElementById('hist-data').value||hojeISO();
+  const ref=db.ref('/execucoes/'+uk+'/'+data+'/'+turno+'/'+taskId);
+  const snap=await ref.get();
+  if(!snap.exists()) return;
+  const e=snap.val();
+  const novo=Math.max(0,parseInt(valor,10)||0);
+  const delta=novo-(e.pontos||0);
+  await ref.update({pontos:novo});
+  await ajustarPontuacao(e.email,e.nome,delta);
+  showToast('✅ Pontuação ajustada.');
+}
+
+async function apagarExecucaoHist(turno,taskId){
+  if(!confirm('Apagar essa tarefa concluída? Os pontos serão removidos do colaborador.')) return;
+  const uk=unidadeKey(unidadeAtiva);
+  const data=document.getElementById('hist-data').value||hojeISO();
+  const ref=db.ref('/execucoes/'+uk+'/'+data+'/'+turno+'/'+taskId);
+  const snap=await ref.get();
+  if(snap.exists()){
+    const e=snap.val();
+    await ajustarPontuacao(e.email,e.nome,-(e.pontos||0));
+  }
+  await ref.remove();
+  await carregarHistorico();
+  showToast('🗑️ Registro apagado.');
+}
+
+async function apagarValidacaoHist(turno){
+  if(!confirm('Apagar a validação desse turno? O bônus de turno será removido e, se for o dia de hoje, o turno volta a ficar aberto pra edição.')) return;
+  const uk=unidadeKey(unidadeAtiva);
+  const data=document.getElementById('hist-data').value||hojeISO();
+  const ref=db.ref('/validacoes/'+uk+'/'+data+'/'+turno);
+  const snap=await ref.get();
+  if(snap.exists()){
+    const v=snap.val();
+    await ajustarPontuacao(v.email,v.nome,-PTS_BONUS_TURNO);
+  }
+  await ref.remove();
+  if(data===hojeISO() && turno===turnoSel) validacaoCache=null;
+  await carregarHistorico();
+  showToast('🗑️ Validação apagada.');
 }
 
 /* ── CONEXÃO ──────────────────────────────────── */
