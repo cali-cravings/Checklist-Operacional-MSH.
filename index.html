@@ -182,10 +182,11 @@ video,canvas{width:100%;border-radius:12px;background:#000}
   <div class="modal">
     <h3 id="concluir-titulo">Validar turno</h3>
     <p id="concluir-sub">Todas as tarefas foram concluídas. Tire uma selfie pra confirmar.</p>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
       <div id="geo-status" style="flex:1;font-size:12.5px;color:var(--muted)">📍 Verificando localização...</div>
       <button type="button" class="btn btn-outline" id="btn-geo-refresh" onclick="verificarLocalizacao()" title="Atualizar localização" style="padding:8px 10px">🔄</button>
     </div>
+    <div id="geo-diag" style="font-size:10.5px;color:var(--muted);margin-bottom:10px;line-height:1.5"></div>
     <video id="cam-video" autoplay playsinline style="display:none"></video>
     <canvas id="cam-canvas" style="display:none"></canvas>
     <img id="cam-preview" class="thumb" style="display:none">
@@ -615,13 +616,29 @@ function abrirValidarTurno(){
   document.getElementById('overlay-concluir').classList.add('on');
   verificarLocalizacao();
 }
-function verificarLocalizacao(){
+async function verificarLocalizacao(){
+  const diag=document.getElementById('geo-diag');
   if(!navigator.geolocation){
     document.getElementById('geo-status').textContent='⚠️ Este aparelho não suporta localização.';
     return;
   }
   _geoOk=false;
   document.getElementById('geo-status').textContent='📍 Verificando localização...';
+
+  // Diagnóstico técnico visível — ajuda a identificar rápido a causa real
+  // (contexto inseguro, permissão negada, navegador embutido de app, etc.)
+  // sem depender só da descrição do usuário.
+  let permTxt='não suportado pelo navegador';
+  try{
+    if(navigator.permissions && navigator.permissions.query){
+      const p=await navigator.permissions.query({name:'geolocation'});
+      permTxt=p.state;
+    }
+  }catch(e){/* alguns navegadores não suportam essa consulta — segue sem ela */}
+  diag.innerHTML='🔧 contexto seguro: '+(window.isSecureContext?'sim':'NÃO')+
+    ' · protocolo: '+location.protocol+
+    ' · permissão: '+permTxt;
+
   if(_geoWatchdog) clearTimeout(_geoWatchdog);
   // Watchdog manual: alguns navegadores (principalmente dentro de apps como
   // WhatsApp/Instagram/Facebook) travam pedindo localização sem nunca chamar
@@ -641,12 +658,15 @@ function verificarLocalizacao(){
     document.getElementById('geo-status').textContent = _geoOk
       ? '✅ Localização confirmada (dentro do restaurante).'
       : '❌ Você está a '+Math.round(dist)+'m do restaurante — precisa estar no local pra concluir.';
+    diag.innerHTML+='<br>📍 lat '+_geoLat.toFixed(6)+', lng '+_geoLng.toFixed(6)+
+      ' · precisão ±'+Math.round(pos.coords.accuracy)+'m · distância calculada: '+Math.round(dist)+'m';
   },err=>{
     clearTimeout(_geoWatchdog);
     _geoOk=false;
     let msg=err.message;
     if(err.code===1) msg='Permissão de localização negada. Vá nas configurações do navegador ou do celular e permita localização pra esse site.';
     document.getElementById('geo-status').textContent='❌ Não foi possível confirmar sua localização: '+msg;
+    diag.innerHTML+='<br>⚠️ código do erro: '+err.code;
   },{enableHighAccuracy:true,timeout:9000,maximumAge:0});
 }
 async function tirarFoto(){
