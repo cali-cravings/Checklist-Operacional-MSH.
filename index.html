@@ -186,7 +186,7 @@ video,canvas{width:100%;border-radius:12px;background:#000}
 <div class="overlay" id="overlay-concluir">
   <div class="modal">
     <h3 id="concluir-titulo">Validar turno</h3>
-    <p id="concluir-sub">Todas as tarefas foram concluídas. Tire uma selfie pra confirmar.</p>
+    <p id="concluir-sub">Suas tarefas foram concluídas. Tire uma selfie pra confirmar.</p>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
       <div id="geo-status" style="flex:1;font-size:12.5px;color:var(--muted)">📍 Verificando localização...</div>
       <button type="button" class="btn btn-outline" id="btn-geo-refresh" onclick="verificarLocalizacao()" title="Atualizar localização" style="padding:8px 10px">🔄</button>
@@ -303,7 +303,7 @@ const REF_LAT = -27.1447222, REF_LNG = -48.5861111; // Píer Oporto, Itapema/Por
 const RAIO_METROS = 200;
 const PTS_TAREFA = 10;
 const PTS_BONUS_PRAZO = 5;
-const PTS_BONUS_TURNO = 20; // bônus por validar o turno inteiro com foto + localização
+const PTS_BONUS_TURNO = 20; // bônus por validar as PRÓPRIAS tarefas do turno com foto + localização
 const LIMITE_HORA = { dia: 17, noite: 24 }; // até que hora do dia conta como "no prazo"
 const RODIZIO_EPOCH = new Date('2026-01-05T00:00:00'); // segunda-feira de referência p/ contar semanas
 
@@ -397,7 +397,8 @@ let souGestor=false;
 let turnoSel=null;
 let tarefasCache={};      // {taskId:{nome,ordem,pontos}}
 let execucoesCache={};    // {taskId:{...}} — tarefas marcadas como feitas hoje
-let validacaoCache=null;  // {email,nome,timestamp,selfie,lat,lng} — validação do turno (só 1 por dia)
+let validacoesCache={};   // {emailKey:{email,nome,timestamp,selfie,lat,lng}} — 1 validação por PESSOA no turno
+                           // (cada colaborador valida só as próprias tarefas, não o turno inteiro do restaurante)
 let responsaveisCache={}; // {taskId:{email,nome,...}} — fixos definidos manualmente pelo gestor
 let colabsAtivosCache=[]; // colaboradores ativos da unidade ativa, p/ calcular o rodízio automático
 let verTudo=false;        // gestor pode alternar entre "minhas tarefas" e ver o checklist inteiro
@@ -528,7 +529,7 @@ async function carregarChecklist(){
   ]);
   tarefasCache=tSnap.exists()?tSnap.val():{};
   execucoesCache=eSnap.exists()?eSnap.val():{};
-  validacaoCache=vSnap.exists()?vSnap.val():null;
+  validacoesCache=vSnap.exists()?vSnap.val():{};
   responsaveisCache=rSnap.exists()?rSnap.val():{};
   const elDataOp=document.getElementById('data-operacao');
   if(elDataOp) elDataOp.textContent='📅 Operação de '+formatarDataBR(dataOperacional());
@@ -539,6 +540,19 @@ async function carregarChecklist(){
 function responsavelDaTarefa(id){
   const t=tarefasCache[id];
   return responsaveisCache[id] || responsavelAutomatico(colabsAtivosCache,turnoSel,(t&&t.ordem)||0);
+}
+// Uma tarefa fica travada quando a PESSOA responsável por ela já validou as
+// próprias tarefas — não quando o turno inteiro do restaurante termina.
+function tarefaTravada(id){
+  const r=responsavelDaTarefa(id);
+  return !!(r && validacoesCache[emailKey(r.email)]);
+}
+function meusIds(idsTodas){
+  if(!googleUser) return [];
+  return idsTodas.filter(id=>{
+    const r=responsavelDaTarefa(id);
+    return r && r.email===googleUser.email;
+  });
 }
 
 function alternarVerTudo(){
@@ -556,7 +570,6 @@ function renderChecklist(){
     btnVerTudo.style.display='none';
     return;
   }
-  const travado=!!validacaoCache;
 
   // Só o gestor tem a opção de ver o checklist inteiro; colaborador comum
   // sempre vê apenas as tarefas que são responsabilidade dele nessa semana.
@@ -565,22 +578,18 @@ function renderChecklist(){
   const exibirTudo=souGestor && verTudo;
   document.getElementById('checklist-titulo').textContent=exibirTudo?'Todas as tarefas do turno':'Minhas tarefas';
 
-  const idsVisiveis=exibirTudo?idsTodas:idsTodas.filter(id=>{
-    const r=responsavelDaTarefa(id);
-    return r && googleUser && r.email===googleUser.email;
-  });
+  const idsVisiveis=exibirTudo?idsTodas:meusIds(idsTodas);
 
   if(!idsVisiveis.length){
     con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa foi designada pra você essa semana. Fale com a gestão se achar que isso está errado.</p>';
   }else{
-    // Colaborador comum fica travado depois do turno validado, mas o gestor
-    // no modo "ver tudo" tem uma opção de corrigir/desmarcar mesmo depois —
-    // é o jeito de resolver um erro sem ter que apagar a tarefa inteira lá
-    // em Gestão (que apaga o TIPO da tarefa, não só a marcação de hoje).
-    const podeMexer=!travado || exibirTudo;
     con.innerHTML=idsVisiveis.map(id=>{
       const t=tarefasCache[id];
       const feita=!!execucoesCache[id];
+      // Cada tarefa trava quando a PESSOA responsável por ela já validou as
+      // próprias tarefas com foto. O gestor no modo "ver tudo" pode corrigir
+      // mesmo assim — sem precisar apagar o tipo da tarefa lá em Gestão.
+      const podeMexer=!tarefaTravada(id) || exibirTudo;
       const clique=podeMexer?`toggleTarefa('${id}')`:'';
       const resp=responsavelDaTarefa(id);
       const fixo=!!responsaveisCache[id];
@@ -597,32 +606,67 @@ function renderChecklist(){
     }).join('');
   }
 
-  // Progresso e liberação da validação do turno sempre usam a lista COMPLETA
-  // de tarefas, mesmo quando a tela só mostra as tarefas de uma pessoa —
-  // senão quem tem poucas tarefas nunca veria "tudo concluído".
+  // A barra de progresso mostra o turno inteiro (visão geral); a liberação
+  // da validação com foto, porém, agora depende só das tarefas da PESSOA
+  // logada — cada um valida a própria parte, não o restaurante inteiro.
   const feitas=idsTodas.filter(id=>execucoesCache[id]).length;
   document.getElementById('prog-fill').style.width=(idsTodas.length?feitas/idsTodas.length*100:0)+'%';
-  document.getElementById('prog-txt').textContent=feitas+' / '+idsTodas.length+' concluídas'+(exibirTudo?'':' no turno todo');
+  document.getElementById('prog-txt').textContent=feitas+' / '+idsTodas.length+' concluídas no turno todo';
 
   const area=document.getElementById('validar-turno-area');
-  if(validacaoCache){
-    area.innerHTML=`<div class="card" style="background:#eef7f0;border-color:#cfe9d6;margin:0">
-      <b style="color:var(--ok);font-size:13px">✅ Turno validado por ${validacaoCache.nome} às ${new Date(validacaoCache.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>
-    </div>`;
-  }else if(feitas===idsTodas.length){
-    area.innerHTML=`<button class="btn btn-primary btn-block" onclick="abrirValidarTurno()">📸 Validar turno com foto (+${PTS_BONUS_TURNO} pts)</button>`;
-  }else{
-    area.innerHTML='';
+  let areaHtml='';
+  const meus=meusIds(idsTodas);
+  if(meus.length){
+    const minhaValidacao=googleUser?validacoesCache[emailKey(googleUser.email)]:null;
+    const meusFeitos=meus.filter(id=>execucoesCache[id]).length;
+    if(minhaValidacao){
+      areaHtml+=`<div class="card" style="background:#eef7f0;border-color:#cfe9d6;margin:0 0 8px">
+        <b style="color:var(--ok);font-size:13px">✅ Você validou suas tarefas às ${new Date(minhaValidacao.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>
+      </div>`;
+    }else if(meusFeitos===meus.length){
+      areaHtml+=`<button class="btn btn-primary btn-block" onclick="abrirValidarTurno()">📸 Validar minhas tarefas com foto (+${PTS_BONUS_TURNO} pts)</button>`;
+    }
   }
+  if(exibirTudo){
+    areaHtml+=resumoValidacoesHtml(idsTodas);
+  }
+  area.innerHTML=areaHtml;
+}
+
+// Resumo (só no modo "ver tudo" do gestor) de quem já validou as próprias
+// tarefas nesse turno e quem ainda está pendente — dá visibilidade do turno
+// inteiro sem precisar abrir a Gestão.
+function resumoValidacoesHtml(idsTodas){
+  const porPessoa={};
+  idsTodas.forEach(id=>{
+    const r=responsavelDaTarefa(id);
+    if(!r) return;
+    const ek=emailKey(r.email);
+    if(!porPessoa[ek]) porPessoa[ek]={nome:r.nome,total:0,feitas:0};
+    porPessoa[ek].total++;
+    if(execucoesCache[id]) porPessoa[ek].feitas++;
+  });
+  const linhas=Object.keys(porPessoa).map(ek=>{
+    const p=porPessoa[ek];
+    const v=validacoesCache[ek];
+    const status=v?('✅ validado às '+new Date(v.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):(p.feitas+'/'+p.total+' concluídas');
+    return `<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0"><span>${p.nome}</span><span style="color:var(--muted)">${status}</span></div>`;
+  }).join('');
+  if(!linhas) return '';
+  return `<div class="card" style="margin:8px 0 0">
+    <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Validações do turno</div>
+    ${linhas}
+  </div>`;
 }
 
 /* ── TOGGLE DE TAREFA (marca/desmarca, sem foto) ── */
 async function toggleTarefa(taskId){
-  // Colaborador comum fica travado depois da validação do turno. Gestor no
-  // modo "ver tudo" pode corrigir mesmo depois — é a opção de desmarcar uma
-  // tarefa sem precisar excluir o tipo da tarefa lá em Gestão.
+  // Uma tarefa trava quando a PESSOA responsável por ela já validou as
+  // próprias tarefas com foto. Gestor no modo "ver tudo" pode corrigir mesmo
+  // assim — é a opção de desmarcar sem precisar excluir o tipo da tarefa lá
+  // em Gestão.
   const gestorPodeSobrescrever = souGestor && verTudo;
-  if(validacaoCache && !gestorPodeSobrescrever){ showToast('⚠️ Turno já validado — não dá mais pra alterar.'); return; }
+  if(tarefaTravada(taskId) && !gestorPodeSobrescrever){ showToast('⚠️ Essa tarefa já foi validada — não dá mais pra alterar.'); return; }
   const uk=unidadeKey(unidadeAtiva);
   const t=tarefasCache[taskId];
   const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
@@ -672,14 +716,16 @@ async function carregarRanking(){
   }catch(err){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Erro ao carregar ranking.</p>'; }
 }
 
-/* ── VALIDAR TURNO (geolocalização + selfie, uma vez, no final) ─── */
+/* ── VALIDAR MINHAS TAREFAS (geolocalização + selfie, uma vez, no final) ─── */
 function abrirValidarTurno(){
-  const ids=Object.keys(tarefasCache);
-  const feitas=ids.filter(id=>execucoesCache[id]).length;
-  if(feitas<ids.length){ showToast('⚠️ Conclua todas as tarefas antes de validar o turno.'); return; }
-  if(validacaoCache){ showToast('⚠️ Turno já validado.'); return; }
+  if(!googleUser) return;
+  const meus=meusIds(Object.keys(tarefasCache));
+  const feitas=meus.filter(id=>execucoesCache[id]).length;
+  if(!meus.length){ showToast('⚠️ Você não tem tarefas designadas nesse turno.'); return; }
+  if(feitas<meus.length){ showToast('⚠️ Conclua todas as suas tarefas antes de validar.'); return; }
+  if(validacoesCache[emailKey(googleUser.email)]){ showToast('⚠️ Você já validou suas tarefas.'); return; }
   _fotoBase64=null; _geoOk=false;
-  document.getElementById('concluir-titulo').textContent='Validar turno';
+  document.getElementById('concluir-titulo').textContent='Validar minhas tarefas';
   document.getElementById('concluir-erro').style.display='none';
   document.getElementById('cam-preview').style.display='none';
   document.getElementById('cam-video').style.display='none';
@@ -746,7 +792,7 @@ async function tirarFoto(){
   const erro=document.getElementById('concluir-erro');
   erro.style.display='none';
   if(!_geoOk){
-    erro.textContent='Você precisa estar dentro do restaurante pra validar o turno.';
+    erro.textContent='Você precisa estar dentro do restaurante pra validar suas tarefas.';
     erro.style.display='block';
     return;
   }
@@ -782,25 +828,26 @@ function fecharConcluir(){
   document.getElementById('btn-tirar-foto').textContent='📷 Tirar foto';
 }
 async function confirmarValidacaoTurno(){
-  if(!_geoOk || !_fotoBase64) return;
+  if(!_geoOk || !_fotoBase64 || !googleUser) return;
   const uk=unidadeKey(unidadeAtiva);
+  const ek=emailKey(googleUser.email);
 
   const registro={
     email:googleUser.email, nome:googleUser.nome, timestamp:Date.now(),
     selfie:_fotoBase64, lat:_geoLat, lng:_geoLng
   };
   try{
-    await db.ref('/validacoes/'+uk+'/'+dataOperacional()+'/'+turnoSel).set(registro);
-    const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
+    await db.ref('/validacoes/'+uk+'/'+dataOperacional()+'/'+turnoSel+'/'+ek).set(registro);
+    const pontRef=db.ref('/pontuacao/'+uk+'/'+ek);
     const pSnap=await pontRef.get();
     const atual=pSnap.exists()?(pSnap.val().total||0):0;
     await pontRef.set({nome:googleUser.nome,total:atual+PTS_BONUS_TURNO});
 
-    validacaoCache=registro;
+    validacoesCache[ek]=registro;
     renderChecklist();
     carregarRanking();
     fecharConcluir();
-    showToast('✅ Turno validado! +'+PTS_BONUS_TURNO+' pontos');
+    showToast('✅ Suas tarefas foram validadas! +'+PTS_BONUS_TURNO+' pontos');
   }catch(err){
     showToast('❌ Erro ao salvar: '+err.message);
   }
@@ -1009,13 +1056,15 @@ async function carregarHistorico(){
     });
   }
   if(vSnap.exists()){
-    const vdados=vSnap.val();
+    const vdados=vSnap.val(); // {turno:{emailKey:{...}}} — 1 validação por PESSOA
     Object.keys(vdados).forEach(turno=>{
-      const v=vdados[turno];
-      html+=`<div class="list-row">
-        <div class="info"><b>✅ Turno validado (${turno})</b><div class="sub">${v.nome} · ${new Date(v.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${PTS_BONUS_TURNO}pts</div></div>
-        <button class="btn-del" onclick="apagarValidacaoHist('${turno}')">🗑️</button>
-      </div>`;
+      Object.keys(vdados[turno]).forEach(ek=>{
+        const v=vdados[turno][ek];
+        html+=`<div class="list-row">
+          <div class="info"><b>✅ ${v.nome} validou (${turno})</b><div class="sub">${new Date(v.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · +${PTS_BONUS_TURNO}pts</div></div>
+          <button class="btn-del" onclick="apagarValidacaoHist('${turno}','${ek}')">🗑️</button>
+        </div>`;
+      });
     });
   }
   con.innerHTML=html || '<p style="color:var(--muted);font-size:13px">Nenhuma tarefa concluída nesse dia.</p>';
@@ -1058,18 +1107,18 @@ async function apagarExecucaoHist(turno,taskId){
   showToast('🗑️ Registro apagado.');
 }
 
-async function apagarValidacaoHist(turno){
-  if(!confirm('Apagar a validação desse turno? O bônus de turno será removido e, se for o dia de hoje, o turno volta a ficar aberto pra edição.')) return;
+async function apagarValidacaoHist(turno,ek){
+  if(!confirm('Apagar essa validação? O bônus de turno será removido dessa pessoa e, se for hoje, as tarefas dela nesse turno voltam a ficar abertas pra edição.')) return;
   const uk=unidadeKey(unidadeAtiva);
   const data=document.getElementById('hist-data').value||dataOperacional();
-  const ref=db.ref('/validacoes/'+uk+'/'+data+'/'+turno);
+  const ref=db.ref('/validacoes/'+uk+'/'+data+'/'+turno+'/'+ek);
   const snap=await ref.get();
   if(snap.exists()){
     const v=snap.val();
     await ajustarPontuacao(v.email,v.nome,-PTS_BONUS_TURNO);
   }
   await ref.remove();
-  if(data===dataOperacional() && turno===turnoSel) validacaoCache=null;
+  if(data===dataOperacional() && turno===turnoSel){ delete validacoesCache[ek]; renderChecklist(); }
   await carregarHistorico();
   showToast('🗑️ Validação apagada.');
 }
