@@ -142,7 +142,7 @@ video,canvas{width:100%;border-radius:12px;background:#000}
         <div class="sub" id="hdr-nome">—</div>
       </div>
       <div class="hdr-actions">
-        <button class="btn btn-ghost" id="btn-gestao" onclick="abrirGestao()" style="display:none">⚙️ Gestão</button>
+        <button class="btn btn-ghost" id="btn-gestao" onclick="abrirGestao()" style="display:none">⚙️ Gestão<span id="badge-problemas" style="display:none;background:var(--erro);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:5px"></span></button>
         <button class="btn btn-ghost" onclick="sair()">Sair</button>
       </div>
     </div>
@@ -167,8 +167,18 @@ video,canvas{width:100%;border-radius:12px;background:#000}
         <button class="turno-btn" id="btn-turno-noite" onclick="selecionarTurno('noite')">🌙 Turno Noite</button>
       </div>
       <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
-      <div style="font-size:12px;color:var(--muted)" id="prog-txt">0 / 0 concluídas</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:12px;color:var(--muted)" id="prog-txt">0 / 0 concluídas</div>
+        <button class="btn btn-ghost" style="padding:4px 8px;font-size:12px" onclick="abrirReportarProblema()">⚠️ Reportar problema</button>
+      </div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px" id="data-operacao"></div>
+    </div>
+
+    <div id="nota-passagem-anterior"></div>
+    <div class="card">
+      <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📝 Nota pra próxima equipe (opcional)</div>
+      <textarea id="nota-passagem-texto" rows="2" placeholder="Ex.: faltou entregar pedido da mesa 5, cliente busca amanhã de manhã" style="width:100%;padding:9px;border:1.5px solid var(--borda);border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box"></textarea>
+      <button class="btn btn-outline btn-block" style="margin-top:8px" onclick="salvarNotaPassagem()">💾 Salvar nota</button>
     </div>
 
     <div class="card">
@@ -178,6 +188,26 @@ video,canvas{width:100%;border-radius:12px;background:#000}
       </div>
       <div id="checklist-lista"><p style="color:var(--muted);font-size:13px">Selecione um turno.</p></div>
       <div id="validar-turno-area" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: REPORTAR PROBLEMA (vira item no backlog de manutenção da Gestão) -->
+<div class="overlay" id="overlay-problema">
+  <div class="modal">
+    <h3>Reportar problema</h3>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Isso cria um item no backlog de manutenção pra gestão ver — não precisa estar ligado a uma tarefa concluída.</p>
+    <div class="fld">
+      <label>Relacionado a uma tarefa? (opcional)</label>
+      <select id="problema-tarefa" style="width:100%;padding:9px;border:1.5px solid var(--borda);border-radius:9px"></select>
+    </div>
+    <div class="fld" style="margin-bottom:0">
+      <label>Descreva o problema</label>
+      <textarea id="problema-texto" rows="3" placeholder="Ex.: TV da sala não liga" style="width:100%;padding:9px;border:1.5px solid var(--borda);border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-outline" style="flex:1" onclick="fecharProblema()">Cancelar</button>
+      <button class="btn btn-primary" style="flex:1" onclick="enviarProblema()">Enviar</button>
     </div>
   </div>
 </div>
@@ -218,6 +248,8 @@ video,canvas{width:100%;border-radius:12px;background:#000}
       <button class="tab-btn" onclick="abrirTabGestao('responsaveis')" id="tabbtn-responsaveis">Responsáveis</button>
       <button class="tab-btn" onclick="abrirTabGestao('colaboradores')" id="tabbtn-colaboradores">Colaboradores</button>
       <button class="tab-btn" onclick="abrirTabGestao('historico')" id="tabbtn-historico">Histórico</button>
+      <button class="tab-btn" onclick="abrirTabGestao('pontos')" id="tabbtn-pontos">Pontos</button>
+      <button class="tab-btn" onclick="abrirTabGestao('problemas')" id="tabbtn-problemas">Problemas</button>
     </div>
 
     <div class="tab-pane on" id="tabpane-tarefas">
@@ -278,6 +310,35 @@ video,canvas{width:100%;border-radius:12px;background:#000}
         <div id="hist-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
       </div>
     </div>
+
+    <div class="tab-pane" id="tabpane-pontos">
+      <div class="card">
+        <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Configurações de pontuação</div>
+        <div class="fld">
+          <label>Bônus por concluir a tarefa no prazo do turno</label>
+          <input type="number" min="0" id="cfg-bonus-prazo" onchange="salvarConfigPontos()">
+        </div>
+        <div class="fld" style="margin-bottom:0">
+          <label>Bônus por validar as próprias tarefas com foto</label>
+          <input type="number" min="0" id="cfg-bonus-turno" onchange="salvarConfigPontos()">
+        </div>
+        <p style="font-size:11.5px;color:var(--muted);margin-top:8px">A pontuação de cada tarefa é editada em Gestão → Tarefas. Esses dois valores aqui são só os bônus extras.</p>
+      </div>
+      <div class="card">
+        <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Ajustar pontuação de um colaborador</div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Corrige o total direto — útil pra consertar um erro ou dar/tirar pontos manualmente.</p>
+        <div id="pontos-ranking-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tabpane-problemas">
+      <div class="card">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px">
+          <input type="checkbox" id="chk-mostrar-resolvidos" onchange="carregarProblemasGer()"> Mostrar também os resolvidos
+        </label>
+        <div id="problemas-lista"><p style="color:var(--muted);font-size:13px">Carregando...</p></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -301,9 +362,13 @@ const authProvider = new firebase.auth.GoogleAuthProvider();
 const UNIDADES = ['CALI CRAVINGS','TEXAS COUNTRY BAR'];
 const REF_LAT = -27.1447222, REF_LNG = -48.5861111; // Píer Oporto, Itapema/Porto Belo (27°08'41"S 48°35'10"O)
 const RAIO_METROS = 200;
-const PTS_TAREFA = 10;
-const PTS_BONUS_PRAZO = 5;
-const PTS_BONUS_TURNO = 20; // bônus por validar as PRÓPRIAS tarefas do turno com foto + localização
+const PTS_TAREFA = 10; // valor padrão ao criar uma tarefa nova (depois é editável por tarefa em Gestão)
+const PTS_BONUS_PRAZO_PADRAO = 5;
+const PTS_BONUS_TURNO_PADRAO = 20;
+// Esses dois começam com o valor padrão mas são "let" porque o gestor pode
+// mudá-los por unidade em Gestão → Pontos (carregarConfigPontos() sobrescreve).
+let PTS_BONUS_PRAZO = PTS_BONUS_PRAZO_PADRAO;
+let PTS_BONUS_TURNO = PTS_BONUS_TURNO_PADRAO; // bônus por validar as PRÓPRIAS tarefas do turno com foto + localização
 const LIMITE_HORA = { dia: 17, noite: 24 }; // até que hora do dia conta como "no prazo"
 const RODIZIO_EPOCH = new Date('2026-01-05T00:00:00'); // segunda-feira de referência p/ contar semanas
 
@@ -483,7 +548,11 @@ function atualizarHdrUnidade(){
 async function carregarUnidadeAtiva(){
   await seedTarefasSeVazio(unidadeAtiva);
   carregarRanking();
-  selecionarTurno(turnoAutomatico());
+  // precisa do await aqui: quem chama carregarUnidadeAtiva() (ex.: trocarUnidadeAtiva)
+  // espera esse retorno pra saber que a troca de unidade já terminou de verdade —
+  // sem o await, o caller seguia em frente antes do checklist da nova unidade
+  // carregar, e por um instante tarefasCache ainda ficava com dados da unidade antiga.
+  await selecionarTurno(turnoAutomatico());
 }
 async function trocarUnidadeAtiva(unidade){
   if(unidade===unidadeAtiva) return;
@@ -527,6 +596,7 @@ async function carregarChecklist(){
     db.ref('/responsaveis/'+uk+'/'+turnoSel).get(),
     db.ref('/colaboradores_autorizados').get()
   ]);
+  await carregarConfigPontos(); // garante que PTS_BONUS_PRAZO/PTS_BONUS_TURNO estao atualizados pra unidade ativa, pra qualquer colaborador (nao so gestor)
   tarefasCache=tSnap.exists()?tSnap.val():{};
   execucoesCache=eSnap.exists()?eSnap.val():{};
   validacoesCache=vSnap.exists()?vSnap.val():{};
@@ -535,6 +605,8 @@ async function carregarChecklist(){
   if(elDataOp) elDataOp.textContent='📅 Operação de '+formatarDataBR(dataOperacional());
   colabsAtivosCache=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva && c.ativo!==false):[];
   renderChecklist();
+  await carregarNotaPassagem();
+  await atualizarBadgeProblemas();
 }
 
 function responsavelDaTarefa(id){
@@ -853,6 +925,105 @@ async function confirmarValidacaoTurno(){
   }
 }
 
+/* ── REPORTAR PROBLEMA (backlog de manutenção) ── */
+function abrirReportarProblema(){
+  const sel=document.getElementById('problema-tarefa');
+  const ids=Object.keys(tarefasCache).sort((a,b)=>(tarefasCache[a].ordem||0)-(tarefasCache[b].ordem||0));
+  sel.innerHTML='<option value="">Problema geral (não é de uma tarefa específica)</option>'
+    + ids.map(id=>`<option value="${id}">${tarefasCache[id].nome}</option>`).join('');
+  document.getElementById('problema-texto').value='';
+  document.getElementById('overlay-problema').classList.add('on');
+}
+function fecharProblema(){
+  document.getElementById('overlay-problema').classList.remove('on');
+}
+async function enviarProblema(){
+  const texto=document.getElementById('problema-texto').value.trim();
+  if(!texto){ showToast('⚠️ Descreva o problema.'); return; }
+  const taskId=document.getElementById('problema-tarefa').value;
+  const uk=unidadeKey(unidadeAtiva);
+  const id='p'+Date.now();
+  const registro={
+    taskId: taskId||null,
+    taskNome: (taskId && tarefasCache[taskId]) ? tarefasCache[taskId].nome : null,
+    turno: turnoSel,
+    data: dataOperacional(),
+    email: googleUser.email,
+    nome: googleUser.nome,
+    texto,
+    timestamp: Date.now(),
+    resolvido: false
+  };
+  try{
+    await db.ref('/problemas/'+uk+'/'+id).set(registro);
+    fecharProblema();
+    showToast('✅ Problema reportado. A gestão foi avisada.');
+    atualizarBadgeProblemas();
+  }catch(err){
+    showToast('❌ Erro ao reportar: '+err.message);
+  }
+}
+async function atualizarBadgeProblemas(){
+  if(!souGestor) return;
+  const uk=unidadeKey(unidadeAtiva);
+  const badge=document.getElementById('badge-problemas');
+  const snap=await db.ref('/problemas/'+uk).get();
+  const dados=snap.exists()?snap.val():{};
+  const abertos=Object.values(dados).filter(p=>!p.resolvido).length;
+  if(abertos>0){ badge.textContent=abertos; badge.style.display='inline'; }
+  else{ badge.style.display='none'; }
+}
+
+/* ── NOTA DE PASSAGEM DE TURNO (dia ↔ noite) ── */
+function dataAnteriorISO(iso){
+  const d=new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()-1);
+  return isoDate(d);
+}
+// Retorna {data,turno} do turno imediatamente anterior ao selecionado — noite
+// olha pro dia do mesmo dia; dia olha pra noite do dia anterior (a virada real
+// de operação, não o calendário puro — mesma lógica de dataOperacional()).
+function turnoAnterior(){
+  if(turnoSel==='noite') return {data:dataOperacional(), turno:'dia'};
+  return {data:dataAnteriorISO(dataOperacional()), turno:'noite'};
+}
+async function carregarNotaPassagem(){
+  const uk=unidadeKey(unidadeAtiva);
+  const anterior=turnoAnterior();
+  const [notaAtualSnap,notaAnteriorSnap]=await Promise.all([
+    db.ref('/notasPassagem/'+uk+'/'+dataOperacional()+'/'+turnoSel).get(),
+    db.ref('/notasPassagem/'+uk+'/'+anterior.data+'/'+anterior.turno).get()
+  ]);
+  const areaAnterior=document.getElementById('nota-passagem-anterior');
+  if(notaAnteriorSnap.exists()){
+    const n=notaAnteriorSnap.val();
+    areaAnterior.innerHTML=`<div class="card" style="background:#fff8e6;border-color:#f0e0b0;margin:0 0 10px">
+      <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">📝 Nota do turno anterior (${anterior.turno==='dia'?'☀️ dia':'🌙 noite'})</div>
+      <div style="font-size:13px;white-space:pre-wrap">${n.texto}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">${n.autorNome} · ${new Date(n.timestamp).toLocaleString('pt-BR')}</div>
+    </div>`;
+  }else{
+    areaAnterior.innerHTML='';
+  }
+  document.getElementById('nota-passagem-texto').value = notaAtualSnap.exists() ? notaAtualSnap.val().texto : '';
+}
+async function salvarNotaPassagem(){
+  const uk=unidadeKey(unidadeAtiva);
+  const texto=document.getElementById('nota-passagem-texto').value.trim();
+  const ref=db.ref('/notasPassagem/'+uk+'/'+dataOperacional()+'/'+turnoSel);
+  try{
+    if(!texto){
+      await ref.remove();
+      showToast('🗑️ Nota removida.');
+    }else{
+      await ref.set({texto, autorEmail:googleUser.email, autorNome:googleUser.nome, timestamp:Date.now()});
+      showToast('✅ Nota de passagem salva.');
+    }
+  }catch(err){
+    showToast('❌ Erro ao salvar: '+err.message);
+  }
+}
+
 /* ── GESTÃO ───────────────────────────────────── */
 let gerTurno='dia';
 function abrirGestao(){
@@ -874,6 +1045,11 @@ function abrirTabGestao(tab){
     if(!inp.value) inp.value=dataOperacional();
     carregarHistorico();
   }
+  if(tab==='pontos'){
+    carregarConfigPontos();
+    carregarRankingGer();
+  }
+  if(tab==='problemas') carregarProblemasGer();
 }
 
 async function gerSelecionarTurno(turno){
@@ -1121,6 +1297,85 @@ async function apagarValidacaoHist(turno,ek){
   if(data===dataOperacional() && turno===turnoSel){ delete validacoesCache[ek]; renderChecklist(); }
   await carregarHistorico();
   showToast('🗑️ Validação apagada.');
+}
+
+/* ── GESTÃO: PROBLEMAS (backlog de manutenção) ── */
+async function carregarProblemasGer(){
+  const uk=unidadeKey(unidadeAtiva);
+  const con=document.getElementById('problemas-lista');
+  const snap=await db.ref('/problemas/'+uk).get();
+  if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhum problema reportado ainda.</p>'; return; }
+  const dados=snap.val();
+  const mostrarResolvidos=document.getElementById('chk-mostrar-resolvidos').checked;
+  const ids=Object.keys(dados)
+    .filter(id=>mostrarResolvidos || !dados[id].resolvido)
+    .sort((a,b)=>(dados[b].timestamp||0)-(dados[a].timestamp||0));
+  con.innerHTML=ids.map(id=>{
+    const p=dados[id];
+    return `<div class="list-row" style="align-items:flex-start">
+      <div class="info">
+        <b>${p.resolvido?'✅ ':'⚠️ '}${p.taskNome||'Problema geral'}</b>
+        <div class="sub">${p.texto}</div>
+        <div class="sub" style="color:var(--muted)">${p.nome} · ${p.turno==='dia'?'☀️ dia':'🌙 noite'} · ${formatarDataBR(p.data)} ${new Date(p.timestamp).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
+      </div>
+      ${p.resolvido?'':`<button class="btn btn-outline" style="padding:6px 10px;font-size:12px;white-space:nowrap" onclick="marcarProblemaResolvido('${id}')">✅ Resolver</button>`}
+    </div>`;
+  }).join('') || '<p style="color:var(--muted);font-size:13px">Nenhum problema em aberto.</p>';
+  atualizarBadgeProblemas();
+}
+async function marcarProblemaResolvido(id){
+  const uk=unidadeKey(unidadeAtiva);
+  await db.ref('/problemas/'+uk+'/'+id).update({resolvido:true, resolvidoPor:googleUser.nome, resolvidoEm:Date.now()});
+  await carregarProblemasGer();
+  showToast('✅ Problema marcado como resolvido.');
+}
+
+/* ── GESTÃO: PONTOS (bônus configuráveis + ajuste manual do ranking) ── */
+async function carregarConfigPontos(){
+  const uk=unidadeKey(unidadeAtiva);
+  const snap=await db.ref('/config/'+uk).get();
+  const cfg=snap.exists()?snap.val():{};
+  PTS_BONUS_PRAZO = cfg.bonusPrazo!=null ? cfg.bonusPrazo : PTS_BONUS_PRAZO_PADRAO;
+  PTS_BONUS_TURNO = cfg.bonusTurno!=null ? cfg.bonusTurno : PTS_BONUS_TURNO_PADRAO;
+  const inpPrazo=document.getElementById('cfg-bonus-prazo');
+  const inpTurno=document.getElementById('cfg-bonus-turno');
+  if(inpPrazo) inpPrazo.value=PTS_BONUS_PRAZO;
+  if(inpTurno) inpTurno.value=PTS_BONUS_TURNO;
+}
+async function salvarConfigPontos(){
+  const uk=unidadeKey(unidadeAtiva);
+  const bonusPrazo=Math.max(0,parseInt(document.getElementById('cfg-bonus-prazo').value,10)||0);
+  const bonusTurno=Math.max(0,parseInt(document.getElementById('cfg-bonus-turno').value,10)||0);
+  await db.ref('/config/'+uk).update({bonusPrazo,bonusTurno});
+  PTS_BONUS_PRAZO=bonusPrazo;
+  PTS_BONUS_TURNO=bonusTurno;
+  showToast('✅ Configuração de pontuação salva.');
+}
+
+async function carregarRankingGer(){
+  const uk=unidadeKey(unidadeAtiva);
+  const con=document.getElementById('pontos-ranking-lista');
+  const snap=await db.ref('/pontuacao/'+uk).get();
+  if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Ninguém pontuou ainda.</p>'; return; }
+  const dados=snap.val();
+  const keys=Object.keys(dados).sort((a,b)=>(dados[b].total||0)-(dados[a].total||0));
+  con.innerHTML=keys.map(k=>{
+    const p=dados[k];
+    return `<div class="list-row">
+      <div class="info"><b>${p.nome||keyParaEmail(k)}</b></div>
+      <input type="number" min="0" value="${p.total||0}" style="width:72px;padding:6px;border:1.5px solid var(--borda);border-radius:7px" onchange="ajustarPontuacaoGer('${k}',this.value)"> pts
+    </div>`;
+  }).join('');
+}
+async function ajustarPontuacaoGer(key,valor){
+  const uk=unidadeKey(unidadeAtiva);
+  const novo=Math.max(0,parseInt(valor,10)||0);
+  const ref=db.ref('/pontuacao/'+uk+'/'+key);
+  const snap=await ref.get();
+  const nome=snap.exists()?snap.val().nome:keyParaEmail(key);
+  await ref.set({nome,total:novo});
+  showToast('✅ Pontuação de '+nome+' atualizada para '+novo+'.');
+  await carregarRankingGer();
 }
 
 /* ── CONEXÃO ──────────────────────────────────── */
