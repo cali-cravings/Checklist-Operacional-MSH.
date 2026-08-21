@@ -231,6 +231,7 @@ video,canvas{width:100%;border-radius:12px;background:#000}
           <input type="text" id="ger-nova-tarefa" placeholder="Nome da nova tarefa" style="flex:1;padding:10px;border:1.5px solid var(--borda);border-radius:9px">
           <button class="btn btn-primary" onclick="adicionarTarefaGer()">+ Add</button>
         </div>
+        <button class="btn btn-outline btn-block" style="margin-top:10px" onclick="restaurarTarefasPadraoGer()">🔄 Restaurar as 15 tarefas padrão desse turno</button>
       </div>
     </div>
 
@@ -572,10 +573,15 @@ function renderChecklist(){
   if(!idsVisiveis.length){
     con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhuma tarefa foi designada pra você essa semana. Fale com a gestão se achar que isso está errado.</p>';
   }else{
+    // Colaborador comum fica travado depois do turno validado, mas o gestor
+    // no modo "ver tudo" tem uma opção de corrigir/desmarcar mesmo depois —
+    // é o jeito de resolver um erro sem ter que apagar a tarefa inteira lá
+    // em Gestão (que apaga o TIPO da tarefa, não só a marcação de hoje).
+    const podeMexer=!travado || exibirTudo;
     con.innerHTML=idsVisiveis.map(id=>{
       const t=tarefasCache[id];
       const feita=!!execucoesCache[id];
-      const clique=travado?'':`toggleTarefa('${id}')`;
+      const clique=podeMexer?`toggleTarefa('${id}')`:'';
       const resp=responsavelDaTarefa(id);
       const fixo=!!responsaveisCache[id];
       const respLinha = resp ? (fixo?`👤 ${resp.nome}`:`🔁 ${resp.nome} (semana)`) : '';
@@ -612,7 +618,11 @@ function renderChecklist(){
 
 /* ── TOGGLE DE TAREFA (marca/desmarca, sem foto) ── */
 async function toggleTarefa(taskId){
-  if(validacaoCache){ showToast('⚠️ Turno já validado — não dá mais pra alterar.'); return; }
+  // Colaborador comum fica travado depois da validação do turno. Gestor no
+  // modo "ver tudo" pode corrigir mesmo depois — é a opção de desmarcar uma
+  // tarefa sem precisar excluir o tipo da tarefa lá em Gestão.
+  const gestorPodeSobrescrever = souGestor && verTudo;
+  if(validacaoCache && !gestorPodeSobrescrever){ showToast('⚠️ Turno já validado — não dá mais pra alterar.'); return; }
   const uk=unidadeKey(unidadeAtiva);
   const t=tarefasCache[taskId];
   const pontRef=db.ref('/pontuacao/'+uk+'/'+emailKey(googleUser.email));
@@ -861,10 +871,32 @@ async function adicionarTarefaGer(){
   showToast('✅ Tarefa adicionada.');
 }
 async function removerTarefaGer(id){
-  if(!confirm('Remover essa tarefa?')) return;
+  const nome=tarefasCache[id]?tarefasCache[id].nome:'essa tarefa';
+  if(!confirm('Excluir "'+nome+'" definitivamente da lista de tarefas desse turno?\n\nIsso não é "desmarcar" — a tarefa deixa de existir pra todo mundo. Se quiser só desmarcar uma tarefa concluída, use "Ver tudo" na tela inicial ou o Histórico.')) return;
   const uk=unidadeKey(unidadeAtiva);
   await db.ref('/tarefas/'+uk+'/'+gerTurno+'/'+id).remove();
   await carregarTarefasGer();
+}
+
+async function restaurarTarefasPadraoGer(){
+  const uk=unidadeKey(unidadeAtiva);
+  const ref=db.ref('/tarefas/'+uk+'/'+gerTurno);
+  const snap=await ref.get();
+  const atuais=snap.exists()?snap.val():{};
+  const ids=Object.keys(atuais);
+  const nomesAtuais=new Set(ids.map(id=>atuais[id].nome));
+  const faltando=TAREFAS_PADRAO[gerTurno].filter(nome=>!nomesAtuais.has(nome));
+  if(!faltando.length){ showToast('✅ Todas as tarefas padrão já estão na lista.'); return; }
+  let proximoNum=ids.length?Math.max(...ids.map(i=>parseInt(i.replace('t',''),10)||0))+1:1;
+  let proximaOrdem=ids.length?Math.max(...ids.map(id=>atuais[id].ordem||0))+1:0;
+  const updates={};
+  faltando.forEach(nome=>{
+    updates['t'+proximoNum]={nome,ordem:proximaOrdem,pontos:PTS_TAREFA};
+    proximoNum++; proximaOrdem++;
+  });
+  await ref.update(updates);
+  await carregarTarefasGer();
+  showToast('✅ '+faltando.length+' tarefa(s) padrão restaurada(s).');
 }
 
 async function carregarResponsaveisGer(){
