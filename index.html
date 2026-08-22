@@ -269,6 +269,11 @@ video,canvas{width:100%;border-radius:12px;background:#000}
 
     <div class="tab-pane" id="tabpane-responsaveis">
       <div class="card">
+        <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📊 Carga atual de tarefas por colaborador</div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Quantas tarefas (fixas + rodízio) cada um tem agora nos dois turnos — use pra equilibrar quem fixar em cada tarefa abaixo.</p>
+        <div id="ger-carga-lista"></div>
+      </div>
+      <div class="card">
         <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Defina quem é responsável por cada tarefa e por quanto tempo.</p>
         <div id="ger-resp-lista"></div>
       </div>
@@ -276,6 +281,14 @@ video,canvas{width:100%;border-radius:12px;background:#000}
 
     <div class="tab-pane" id="tabpane-colaboradores">
       <div class="card">
+        <div class="fld" style="margin-bottom:10px">
+          <label>Filtrar por unidade</label>
+          <select id="colab-filtro-unidade" onchange="carregarColaboradoresGer()">
+            <option value="">Todas as unidades</option>
+            <option value="CALI CRAVINGS">Cali Cravings</option>
+            <option value="TEXAS COUNTRY BAR">Texas Country Bar</option>
+          </select>
+        </div>
         <div id="colab-lista"></div>
         <div class="fld" style="margin-top:10px">
           <label>Nome</label>
@@ -1122,6 +1135,37 @@ async function restaurarTarefasPadraoGer(){
   showToast('✅ '+faltando.length+' tarefa(s) padrão restaurada(s).');
 }
 
+// Conta quantas tarefas (fixas ou por rodízio) cada colaborador tem AGORA, nos dois
+// turnos, pra ajudar o gestor a equilibrar a distribuição. Função pura, fácil de testar.
+function calcularCargaTarefas(colabs,tarefasDia,tarefasNoite,resp){
+  const carga={};
+  colabs.forEach(c=>{ carga[c.email]={email:c.email,nome:c.nome,dia:0,noite:0}; });
+  function contar(turno,tarefas){
+    Object.keys(tarefas).forEach(id=>{
+      const atual=(resp[turno]||{})[id];
+      const responsavel=atual||responsavelAutomatico(colabs,turno,tarefas[id].ordem||0);
+      if(!responsavel) return;
+      if(!carga[responsavel.email]) carga[responsavel.email]={email:responsavel.email,nome:responsavel.nome,dia:0,noite:0};
+      carga[responsavel.email][turno]++;
+    });
+  }
+  contar('dia',tarefasDia);
+  contar('noite',tarefasNoite);
+  return Object.values(carga).map(c=>({...c,total:c.dia+c.noite})).sort((a,b)=>b.total-a.total||a.nome.localeCompare(b.nome));
+}
+function renderCargaTarefasHtml(lista){
+  if(!lista.length) return '<p style="color:var(--muted);font-size:13px">Nenhum colaborador ativo nessa unidade.</p>';
+  const max=Math.max(...lista.map(c=>c.total),1);
+  return lista.map(c=>`<div class="list-row">
+    <div class="info" style="flex:1"><b>${c.nome}</b>
+      <div class="sub">☀️ ${c.dia} · 🌙 ${c.noite}</div>
+      <div style="background:#eee;border-radius:6px;height:6px;margin-top:5px;overflow:hidden">
+        <div style="background:var(--verde-esc);height:100%;width:${Math.round(c.total/max*100)}%"></div>
+      </div>
+    </div>
+    <div style="font-weight:700;font-size:16px;white-space:nowrap;padding-left:8px">${c.total}</div>
+  </div>`).join('');
+}
 async function carregarResponsaveisGer(){
   const uk=unidadeKey(unidadeAtiva);
   const con=document.getElementById('ger-resp-lista');
@@ -1131,11 +1175,14 @@ async function carregarResponsaveisGer(){
   ]);
   const colabs=cSnap.exists()?Object.values(cSnap.val()).filter(c=>c.unidade===unidadeAtiva && c.ativo!==false):[];
   const resp=rSnap.exists()?rSnap.val():{};
+  const tarefasDia=tSnapDia.val()||{};
+  const tarefasNoite=tSnapNoite.val()||{};
+  document.getElementById('ger-carga-lista').innerHTML=renderCargaTarefasHtml(calcularCargaTarefas(colabs,tarefasDia,tarefasNoite,resp));
   let html=`<div style="background:#eef7f0;border:1px solid #cfe9d6;border-radius:9px;padding:9px 11px;font-size:12px;color:var(--verde-esc);margin-bottom:10px">
     🔁 <b>Rodízio automático ativo</b> — quando ninguém fica fixo numa tarefa, o sistema troca sozinho o responsável a cada 7 dias entre os colaboradores ativos da unidade. Selecionar um nome trava a tarefa pra essa pessoa até você tirar.
   </div>`;
   ['dia','noite'].forEach(turno=>{
-    const tarefas=(turno==='dia'?tSnapDia:tSnapNoite).val()||{};
+    const tarefas=turno==='dia'?tarefasDia:tarefasNoite;
     const ids=Object.keys(tarefas).sort((a,b)=>(tarefas[a].ordem||0)-(tarefas[b].ordem||0));
     html+=`<div style="font-weight:700;font-size:12.5px;margin:10px 0 4px;color:var(--muted);text-transform:uppercase">${turno==='dia'?'☀️ Dia':'🌙 Noite'}</div>`;
     ids.forEach(id=>{
@@ -1156,10 +1203,13 @@ async function carregarResponsaveisGer(){
 }
 async function definirResponsavel(turno,taskId,email){
   const uk=unidadeKey(unidadeAtiva);
-  if(!email){ await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).remove(); return; }
-  const nome=(await db.ref('/colaboradores_autorizados/'+emailKey(email)).get()).val()?.nome||email;
-  await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).set({email,nome,inicio:hojeISO()});
-  showToast('✅ Responsável definido.');
+  if(!email){ await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).remove(); }
+  else{
+    const nome=(await db.ref('/colaboradores_autorizados/'+emailKey(email)).get()).val()?.nome||email;
+    await db.ref('/responsaveis/'+uk+'/'+turno+'/'+taskId).set({email,nome,inicio:hojeISO()});
+    showToast('✅ Responsável definido.');
+  }
+  await carregarResponsaveisGer(); // atualiza o painel de carga e o "essa semana" na hora
 }
 
 async function carregarColaboradoresGer(){
@@ -1168,7 +1218,9 @@ async function carregarColaboradoresGer(){
   const snap=await db.ref('/colaboradores_autorizados').get();
   if(!snap.exists()){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhum colaborador cadastrado.</p>'; return; }
   const dados=snap.val();
-  const keys=Object.keys(dados);
+  const filtro=document.getElementById('colab-filtro-unidade').value;
+  const keys=Object.keys(dados).filter(k=>!filtro || dados[k].unidade===filtro);
+  if(!keys.length){ con.innerHTML='<p style="color:var(--muted);font-size:13px">Nenhum colaborador cadastrado nessa unidade.</p>'; return; }
   con.innerHTML=keys.map(k=>{
     const c=dados[k];
     return `<div class="list-row">
